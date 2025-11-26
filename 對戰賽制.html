@@ -65,6 +65,7 @@
             const [inputCount, setInputCount] = useState(11); 
             const [rounds, setRounds] = useState([]); 
             const [winner, setWinner] = useState(null);
+            // activeMatchParams: { rIndex, mIndex, subMatchIndex (optional) }
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
 
@@ -265,7 +266,24 @@
             const openMatchView = (rIndex, mIndex) => {
                 const match = rounds[rIndex][mIndex];
                 if (match.type === 'seed') return; 
+                // 這裡不需要 subMatchIndex，因為 RR3 是進入總覽頁
                 setActiveMatchParams({ rIndex, mIndex });
+                setView('match');
+            };
+
+            const openSubMatchView = (subMatchIndex) => {
+                // 從 RR3 總覽頁進入子比賽計分
+                if (!activeMatchParams) return;
+                setActiveMatchParams({ ...activeMatchParams, subMatchIndex });
+                setView('subMatch'); // 新增一個 view 狀態
+            };
+
+            const closeSubMatchView = () => {
+                // 返回 RR3 總覽頁
+                if (!activeMatchParams) return;
+                const newParams = { ...activeMatchParams };
+                delete newParams.subMatchIndex;
+                setActiveMatchParams(newParams);
                 setView('match');
             };
 
@@ -622,29 +640,32 @@
                                 {/* Matches */}
                                 <div className="space-y-4 pb-4">
                                     {match.subMatches.map((sub, idx) => (
-                                        <div key={sub.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                                            <div className="text-xs font-bold text-gray-400 mb-2 text-center">GAME {idx + 1}</div>
+                                        <div 
+                                            key={sub.id} 
+                                            onClick={() => openSubMatchView(idx)}
+                                            className={`bg-white rounded-xl shadow-sm border border-gray-200 p-4 relative overflow-hidden active:scale-95 transition-transform select-none
+                                                ${sub.winner ? 'border-blue-400 ring-1 ring-blue-100' : ''}
+                                            `}
+                                        >
+                                            <div className="text-xs font-bold text-gray-400 mb-2 text-center flex justify-between items-center">
+                                                <span>GAME {idx + 1}</span>
+                                                {sub.winner ? <span className="text-blue-500 flex items-center gap-1"><Icons.CheckCircle size={12}/> 已完賽</span> : <span className="text-gray-300">點擊開始</span>}
+                                            </div>
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="flex flex-col items-center flex-1">
-                                                    <div className={`font-bold text-lg mb-2 text-center break-words w-full ${sub.winner===sub.p1 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p1}</div>
-                                                    <div className="flex items-center gap-2">
-                                                        <button onClick={() => updateMatchScore(sub.id, true, -1)} className="w-8 h-8 rounded-full bg-gray-100 active:bg-gray-200 flex items-center justify-center font-bold">-</button>
-                                                        <span className="text-2xl font-bold w-8 text-center">{sub.s1}</span>
-                                                        <button onClick={() => updateMatchScore(sub.id, true, 1)} className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 active:bg-blue-200 flex items-center justify-center font-bold">+</button>
-                                                    </div>
+                                                    <div className={`font-bold text-lg mb-1 text-center break-words w-full ${sub.winner===sub.p1 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p1}</div>
+                                                    <div className="text-2xl font-bold text-gray-600">{sub.s1}</div>
                                                 </div>
                                                 
                                                 <div className="font-black text-gray-200 text-xl">VS</div>
 
                                                 <div className="flex flex-col items-center flex-1">
-                                                    <div className={`font-bold text-lg mb-2 text-center break-words w-full ${sub.winner===sub.p2 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p2}</div>
-                                                    <div className="flex items-center gap-2">
-                                                        <button onClick={() => updateMatchScore(sub.id, false, -1)} className="w-8 h-8 rounded-full bg-gray-100 active:bg-gray-200 flex items-center justify-center font-bold">-</button>
-                                                        <span className="text-2xl font-bold w-8 text-center">{sub.s2}</span>
-                                                        <button onClick={() => updateMatchScore(sub.id, false, 1)} className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 active:bg-blue-200 flex items-center justify-center font-bold">+</button>
-                                                    </div>
+                                                    <div className={`font-bold text-lg mb-1 text-center break-words w-full ${sub.winner===sub.p2 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p2}</div>
+                                                    <div className="text-2xl font-bold text-gray-600">{sub.s2}</div>
                                                 </div>
                                             </div>
+                                            {/* Touch Ripple Effect Overlay */}
+                                            <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity pointer-events-none"></div>
                                         </div>
                                     ))}
                                 </div>
@@ -663,9 +684,61 @@
                 }
             };
 
+            // --- New: Render Sub Match View (for RR3 individual games) ---
+            const renderSubMatchView = () => {
+                if (!activeMatchParams || activeMatchParams.subMatchIndex === undefined) return null;
+                
+                const { rIndex, mIndex, subMatchIndex } = activeMatchParams;
+                const parentMatch = rounds[rIndex][mIndex];
+                const subMatch = parentMatch.subMatches[subMatchIndex];
+
+                // We reuse updateMatchScore logic but need to target the subMatch ID
+                // The existing updateMatchScore handles subMatch ID targeting
+                
+                return (
+                    <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
+                        <div className="bg-white shadow-sm p-4 flex items-center justify-between">
+                            <button onClick={closeSubMatchView} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
+                            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />循環賽 G{subMatchIndex + 1}</h2>
+                            <div className="w-10"></div>
+                        </div>
+                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
+                            <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${subMatch.winner === subMatch.p1 ? 'bg-red-50' : 'bg-white'}`}>
+                                <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p1}</div>
+                                <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
+                                <div className="flex items-center gap-6">
+                                    <button onClick={() => updateMatchScore(subMatch.id, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
+                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{subMatch.s1}</div>
+                                    <button onClick={() => updateMatchScore(subMatch.id, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
+                                </div>
+                                {subMatch.s1 >= 4 && subMatch.winner === subMatch.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
+                            </div>
+                            <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
+                            <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${subMatch.winner === subMatch.p2 ? 'bg-blue-50' : 'bg-white'}`}>
+                                <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p2}</div>
+                                <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
+                                <div className="flex items-center gap-6">
+                                    <button onClick={() => updateMatchScore(subMatch.id, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
+                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{subMatch.s2}</div>
+                                    <button onClick={() => updateMatchScore(subMatch.id, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
+                                </div>
+                                {subMatch.s2 >= 4 && subMatch.winner === subMatch.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
+                            </div>
+                        </div>
+                        
+                        {/* 返回按鈕 (無論是否完賽都顯示，方便中途退出) */}
+                        <div className="bg-white border-t p-6 flex justify-center safe-area-pb animate-slide-up shadow-2xl z-20">
+                            <button onClick={closeSubMatchView} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
+                                <Icons.CheckCircle size={24} /> {subMatch.winner ? '確認並返回' : '返回總覽'}
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
             return (
                 <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-blue-100 flex flex-col">
-                    {view !== 'match' && (
+                    {view !== 'match' && view !== 'subMatch' && (
                         <header className="bg-white shadow-sm sticky top-0 z-10">
                             <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
                                 <div className="flex items-center gap-2">
@@ -683,6 +756,7 @@
                         {view === 'setup' && renderSetup()}
                         {view === 'bracket' && renderBracket()}
                         {view === 'match' && renderMatchView()}
+                        {view === 'subMatch' && renderSubMatchView()}
                     </main>
 
                     {showResetConfirm && (
