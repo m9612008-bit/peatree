@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>混合賽制產生器</title>
+    
+    <!-- 引入 React 和 Tailwind -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        /* 手機優化 */
+        body { -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes bounce-in { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }
+        .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
+        .animate-bounce-in { animation: bounce-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Icons Components (SVG Paths) ---
+        const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {path}
+            </svg>
+        );
+
+        const Icons = {
+            Trophy: (p) => <Icon {...p} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />,
+            Users: (p) => <Icon {...p} path={<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} />,
+            Shuffle: (p) => <Icon {...p} path={<><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/></>} />,
+            RotateCcw: (p) => <Icon {...p} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />,
+            Download: (p) => <Icon {...p} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></>} />,
+            Info: (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></>} />,
+            List: (p) => <Icon {...p} path={<><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></>} />,
+            Hash: (p) => <Icon {...p} path={<><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></>} />,
+            Minus: (p) => <Icon {...p} path={<><path d="M5 12h14"/></>} />,
+            Plus: (p) => <Icon {...p} path={<><path d="M5 12h14"/><path d="M12 5v14"/></>} />,
+            ArrowLeft: (p) => <Icon {...p} path={<><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></>} />,
+            CheckCircle: (p) => <Icon {...p} path={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>} />,
+            Swords: (p) => <Icon {...p} path={<><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/></>} />,
+            LayoutList: (p) => <Icon {...p} path={<><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 4h7"/><path d="M14 9h7"/><path d="M14 15h7"/><path d="M14 20h7"/></>} />,
+            AlertCircle: (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></>} />,
+            Crown: (p) => <Icon {...p} path={<><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></>} />,
+            Zap: (p) => <Icon {...p} path={<><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></>} />
+        };
+
+        // --- Main App Component ---
+        const App = () => {
+            const [view, setView] = useState('setup'); 
+            const [inputMode, setInputMode] = useState('text'); 
+            const [inputText, setInputText] = useState('');
+            const [inputCount, setInputCount] = useState(11); 
+            const [rounds, setRounds] = useState([]); 
+            const [winner, setWinner] = useState(null);
+            const [activeMatchParams, setActiveMatchParams] = useState(null); 
+            const [nextRoundReady, setNextRoundReady] = useState(false); 
+
+            const [showResetConfirm, setShowResetConfirm] = useState(false);
+            const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
+
+            const handleSampleData = () => {
+                const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`);
+                setInputText(samples.join('\n'));
+            };
+
+            const shuffleArray = (array) => {
+                let currentIndex = array.length, randomIndex;
+                while (currentIndex !== 0) {
+                    randomIndex = Math.floor(Math.random() * currentIndex);
+                    currentIndex--;
+                    [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+                }
+                return array;
+            };
+
+            const showAlert = (msg) => {
+                setAlertInfo({ show: true, message: msg });
+            };
+
+            // --- 核心邏輯 1: 初始化第一輪 (洗牌隨機對戰) ---
+            const generateFirstRound = () => {
+                let lines = [];
+                if (inputMode === 'text') {
+                    lines = inputText.split(/[\n,]+/).map(s => s.trim()).filter(s => s !== '');
+                    if (lines.length < 2) {
+                        showAlert("請至少輸入兩位參賽者");
+                        return;
+                    }
+                } else {
+                    const count = parseInt(inputCount, 10);
+                    if (isNaN(count) || count < 2) {
+                        showAlert("請輸入有效的人數（至少 2 人）");
+                        return;
+                    }
+                    lines = Array.from({ length: count }, (_, i) => `${i + 1}號`);
+                }
+
+                // *** 修改點：第一輪進行隨機洗牌 ***
+                let players = shuffleArray([...lines]);
+
+                const round1Matches = [];
+                let i = 0;
+                while (i < players.length) {
+                    const p1 = players[i];
+                    const p2 = players[i+1]; 
+
+                    if (p2) {
+                        // 成對
+                        round1Matches.push({
+                            id: `r0-m${round1Matches.length}`,
+                            type: 'normal',
+                            p1: p1, p2: p2,
+                            s1: 0, s2: 0,
+                            winner: null,
+                            round: 0
+                        });
+                        i += 2;
+                    } else {
+                        // 落單 (因為已洗牌，這算是隨機輪空)
+                        round1Matches.push({
+                            id: `r0-m${round1Matches.length}`,
+                            type: 'seed',
+                            p1: p1, p2: null,
+                            winner: p1, 
+                            round: 0
+                        });
+                        i += 1;
+                    }
+                }
+
+                setRounds([round1Matches]);
+                setWinner(null);
+                setNextRoundReady(false);
+                setView('bracket');
+            };
+
+            // --- 核心邏輯 2: 生成下一輪 (保持順序 + 隨機抽輪空) ---
+            const createNextRoundMatches = (currentRounds) => {
+                const currentRoundIdx = currentRounds.length - 1;
+                const currentRound = currentRounds[currentRoundIdx];
+
+                // 取得晉級者 (保持上一輪的晉級順序)
+                const winners = [];
+                currentRound.forEach(m => {
+                    if (m.winner) winners.push(m.winner);
+                });
+
+                if (winners.length <= 1) return null; 
+
+                let nextMatches = [];
+                const nextRoundIndex = currentRounds.length;
+
+                // 特殊規則：3人循環賽
+                if (winners.length === 3) {
+                    const p1 = winners[0];
+                    const p2 = winners[1];
+                    const p3 = winners[2];
+
+                    nextMatches.push({
+                        id: `r${nextRoundIndex}-m0`,
+                        type: 'rr3', 
+                        p1: p1, p2: p2, p3: p3,
+                        winner: null,
+                        round: nextRoundIndex,
+                        subMatches: [
+                            { id: 'sub1', p1: p1, p2: p2, s1: 0, s2: 0, winner: null },
+                            { id: 'sub2', p1: p2, p2: p3, s1: 0, s2: 0, winner: null },
+                            { id: 'sub3', p1: p3, p2: p1, s1: 0, s2: 0, winner: null },
+                        ]
+                    });
+                } else {
+                    // 一般規則：保持順序，但若奇數則隨機抽一人輪空
+                    
+                    let pairingPool = [...winners]; // 複製一份名單 (保持原順序)
+                    let byePlayer = null;
+
+                    // 如果人數是奇數 (且不是3人)，隨機抽一個人出來當種子
+                    if (pairingPool.length % 2 !== 0) {
+                        const randomIndex = Math.floor(Math.random() * pairingPool.length);
+                        byePlayer = pairingPool[randomIndex];
+                        // 從配對池中移除這個人，其他人順序不變 (Array.splice 會改變原陣列)
+                        pairingPool.splice(randomIndex, 1);
+                    }
+
+                    // 剩下的依序配對
+                    let i = 0;
+                    while (i < pairingPool.length) {
+                        const p1 = pairingPool[i];
+                        const p2 = pairingPool[i+1];
+
+                        if (p2) {
+                            nextMatches.push({
+                                id: `r${nextRoundIndex}-m${nextMatches.length}`,
+                                type: 'normal',
+                                p1: p1, p2: p2,
+                                s1: 0, s2: 0,
+                                winner: null,
+                                round: nextRoundIndex
+                            });
+                            i += 2;
+                        } else {
+                            // 這裡理論上不會跑到，因為奇數已經被上面的邏輯抽走了
+                            nextMatches.push({
+                                id: `r${nextRoundIndex}-m${nextMatches.length}`,
+                                type: 'seed',
+                                p1: p1, p2: null,
+                                winner: p1,
+                                round: nextRoundIndex
+                            });
+                            i += 1;
+                        }
+                    }
+
+                    // 如果有隨機抽出的輪空者，加在最後面
+                    if (byePlayer) {
+                        nextMatches.push({
+                            id: `r${nextRoundIndex}-m${nextMatches.length}`,
+                            type: 'seed',
+                            p1: byePlayer, p2: null,
+                            winner: byePlayer,
+                            round: nextRoundIndex
+                        });
+                    }
+                }
+                return nextMatches;
+            };
+
+            // 按鈕觸發的生成下一輪
+            const handleGenerateNextRound = () => {
+                const nextMatches = createNextRoundMatches(rounds);
+                if (nextMatches) {
+                    setRounds([...rounds, nextMatches]);
+                    setNextRoundReady(false);
+                }
+            };
+
+            // --- 自動化監聽 (useEffect) ---
+            useEffect(() => {
+                if (rounds.length === 0) return;
+                
+                // 檢查最後一輪是否結束
+                const currentRound = rounds[rounds.length - 1];
+                const allFinished = currentRound.every(m => m.winner !== null);
+
+                if (allFinished && !winner) {
+                    const winners = currentRound.map(m => m.winner).filter(w => w);
+                    
+                    if (winners.length === 1) {
+                        // 情況 A: 只剩 1 人 -> 冠軍誕生
+                        setWinner(winners[0]);
+                        setNextRoundReady(false);
+                    } else if (winners.length === 2) {
+                        // 情況 B: 剩 2 人 -> 自動生成決賽
+                        const nextMatches = createNextRoundMatches(rounds);
+                        if (nextMatches) {
+                            setRounds(prev => [...prev, nextMatches]);
+                            setNextRoundReady(false);
+                        }
+                    } else {
+                        // 情況 C: 剩 3人以上 -> 顯示按鈕
+                        setNextRoundReady(true);
+                    }
+                } else {
+                    setNextRoundReady(false);
+                }
+            }, [rounds, winner]);
+
+            // --- 互動邏輯 ---
+
+            const openMatchView = (rIndex, mIndex) => {
+                const match = rounds[rIndex][mIndex];
+                if (match.type === 'seed') return; 
+                setActiveMatchParams({ rIndex, mIndex });
+                setView('match');
+            };
+
+            const calculateRR3Winner = (match) => {
+                const stats = {};
+                [match.p1, match.p2, match.p3].forEach(p => {
+                    stats[p] = { name: p, wins: 0, score: 0 };
+                });
+
+                match.subMatches.forEach(sub => {
+                    if (sub.winner) stats[sub.winner].wins += 1;
+                    stats[sub.p1].score += sub.s1;
+                    stats[sub.p2].score += sub.s2;
+                });
+
+                const ranking = Object.values(stats).sort((a, b) => {
+                    if (b.wins !== a.wins) return b.wins - a.wins;
+                    return b.score - a.score;
+                });
+
+                return ranking[0].name;
+            };
+
+            const updateMatchScore = (targetId, isP1, delta) => {
+                if (!activeMatchParams) return;
+                const { rIndex, mIndex } = activeMatchParams;
+                const newRounds = rounds.map(r => r.map(m => {
+                    if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) };
+                    return { ...m };
+                }));
+                
+                const match = newRounds[rIndex][mIndex];
+
+                if (match.type === 'normal') {
+                    let newScore = isP1 ? match.s1 + delta : match.s2 + delta;
+                    if (newScore < 0) newScore = 0;
+                    if (newScore > 6) newScore = 6;
+                    
+                    if (isP1) match.s1 = newScore;
+                    else match.s2 = newScore;
+
+                    if (match.s1 >= 4 && match.s1 > match.s2) match.winner = match.p1;
+                    else if (match.s2 >= 4 && match.s2 > match.s1) match.winner = match.p2;
+                    else match.winner = null;
+                } 
+                else if (match.type === 'rr3') {
+                    const sub = match.subMatches.find(m => m.id === targetId);
+                    if (sub) {
+                        let newScore = isP1 ? sub.s1 + delta : sub.s2 + delta;
+                        if (newScore < 0) newScore = 0;
+                        if (newScore > 6) newScore = 6;
+                        
+                        if (isP1) sub.s1 = newScore;
+                        else sub.s2 = newScore;
+
+                        if (sub.s1 >= 4 && sub.s1 > sub.s2) sub.winner = sub.p1;
+                        else if (sub.s2 >= 4 && sub.s2 > sub.s1) sub.winner = sub.p2;
+                        else sub.winner = null;
+                    }
+                }
+
+                setRounds(newRounds);
+            };
+
+            const confirmMatchResult = () => {
+                if (!activeMatchParams) return;
+                const { rIndex, mIndex } = activeMatchParams;
+                
+                const newRounds = rounds.map(r => r.map(m => {
+                    if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) };
+                    return { ...m };
+                }));
+                const match = newRounds[rIndex][mIndex];
+                let currentWinner = match.winner;
+
+                if (match.type === 'normal') {
+                    if (!currentWinner) {
+                        if (match.s1 > match.s2) currentWinner = match.p1;
+                        else if (match.s2 > match.s1) currentWinner = match.p2;
+                    }
+                } else if (match.type === 'rr3') {
+                    currentWinner = calculateRR3Winner(match);
+                }
+
+                if (currentWinner) {
+                    match.winner = currentWinner;
+                }
+
+                setRounds(newRounds);
+                setView('bracket');
+                setActiveMatchParams(null);
+            };
+            
+            const executeReset = () => {
+                setView('setup');
+                setRounds([]);
+                setWinner(null);
+                setNextRoundReady(false);
+                setShowResetConfirm(false);
+            };
+
+            // Renders
+            const renderSetup = () => (
+                <div className="max-w-lg mx-auto mt-10 animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+                        <div className="p-8">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                    <Icons.Users className="text-blue-500" size={24} />
+                                    建立賽程
+                                </h2>
+                            </div>
+
+                            <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
+                                <button onClick={() => setInputMode('text')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${inputMode === 'text' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>輸入名單</button>
+                                <button onClick={() => setInputMode('number')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${inputMode === 'number' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>輸入人數</button>
+                            </div>
+                            
+                            <div className="mb-4">
+                                {inputMode === 'text' ? (
+                                    <>
+                                        <textarea
+                                            className="w-full h-48 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-base"
+                                            placeholder="請輸入名字&#10;一行一個"
+                                            value={inputText}
+                                            onChange={(e) => setInputText(e.target.value)}
+                                        />
+                                        <button onClick={handleSampleData} className="text-xs text-blue-500 hover:underline mt-2">帶入範例 (11人)</button>
+                                    </>
+                                ) : (
+                                    <div className="py-8 flex flex-col items-center">
+                                        <div className="flex items-center gap-4">
+                                            <button onClick={() => setInputCount(p => Math.max(2, p - 1))} className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center font-bold text-xl">-</button>
+                                            <input type="number" value={inputCount} onChange={(e) => setInputCount(Math.max(2, parseInt(e.target.value)||2))} className="w-32 text-center text-4xl font-bold text-blue-600 bg-transparent outline-none border-b-2 border-blue-200" />
+                                            <button onClick={() => setInputCount(p => p + 1)} className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center font-bold text-xl">+</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div className="bg-blue-50 p-3 rounded-lg mb-4 text-xs text-blue-700 space-y-1">
+                                <div className="flex gap-2"><Icons.Shuffle size={14} className="mt-0.5"/> <span><strong>第一輪</strong>：隨機洗牌後配對。</span></div>
+                                <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對，若為奇數隨機抽輪空。</span></div>
+                                <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>三人循環</strong>：若該輪剩 3 人，自動轉為循環賽。</span></div>
+                            </div>
+
+                            <button onClick={generateFirstRound} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 text-lg active:scale-[0.98] transition-transform">
+                                <Icons.Zap size={20} /> 開始第一輪對戰
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderBracket = () => (
+                <div className="flex flex-col h-full">
+                    {winner && (
+                        <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm">
+                            <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
+                            <h2 className="text-3xl font-extrabold text-yellow-700">冠軍誕生！</h2>
+                            <p className="text-xl mt-2 text-yellow-800 font-medium">{winner}</p>
+                        </div>
+                    )}
+
+                    {nextRoundReady && !winner && (
+                        <div className="sticky top-20 z-20 flex justify-center mb-6 animate-bounce-in px-4">
+                            <button 
+                                onClick={handleGenerateNextRound}
+                                className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 hover:bg-black active:scale-95 transition-all font-bold border-4 border-white w-full sm:w-auto justify-center"
+                            >
+                                <Icons.Shuffle size={18} />
+                                <span>該輪結束，隨機抽輪空 (若奇數)</span>
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="flex-1 overflow-x-auto pb-12 no-scrollbar">
+                        <div className="inline-flex min-w-full p-4 gap-4 justify-center">
+                            {rounds.map((round, rIndex) => (
+                                <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
+                                    <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2">
+                                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+                                            {round[0].type === 'rr3' ? '循環賽 (決賽)' : `第 ${rIndex + 1} 輪`}
+                                        </h3>
+                                        <span className="text-xs text-gray-400">{round.length} 場賽事</span>
+                                    </div>
+                                    
+                                    {round.map((match, mIndex) => {
+                                        const isSeed = match.type === 'seed';
+                                        const isRR3 = match.type === 'rr3';
+                                        
+                                        return (
+                                            <div 
+                                                key={match.id} 
+                                                onClick={() => openMatchView(rIndex, mIndex)}
+                                                className={`
+                                                    relative flex flex-col justify-center bg-white border rounded-xl shadow-sm overflow-hidden transition-all duration-200 select-none
+                                                    ${match.winner && !isSeed ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}
+                                                    ${!match.winner && !isSeed ? 'active:scale-95 active:bg-blue-50' : ''}
+                                                    ${isSeed ? 'bg-yellow-50/50 border-yellow-200' : ''}
+                                                    ${isRR3 ? 'border-l-4 border-l-purple-500' : ''}
+                                                `}
+                                            >
+                                                {isRR3 && (
+                                                    <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">
+                                                        3人循環賽
+                                                    </div>
+                                                )}
+
+                                                {isSeed ? (
+                                                    <div className="p-4 flex items-center justify-between">
+                                                        <div className="flex items-center gap-2 overflow-hidden">
+                                                            <Icons.Crown size={16} className="text-yellow-500 shrink-0" />
+                                                            <span className="font-bold text-gray-800 truncate">{match.p1}</span>
+                                                        </div>
+                                                        <span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full whitespace-nowrap">輪空晉級</span>
+                                                    </div>
+                                                ) : isRR3 ? (
+                                                    <div className="p-0">
+                                                        {[match.p1, match.p2, match.p3].map((p, idx) => (
+                                                            <div key={idx} className={`px-4 py-2 flex justify-between items-center border-b border-gray-100 last:border-0 ${match.winner === p && p ? 'bg-blue-50' : ''}`}>
+                                                                <span className={`text-sm font-medium truncate ${!p ? 'text-gray-300' : 'text-gray-800'}`}>{p}</span>
+                                                                {match.winner === p && <Icons.CheckCircle size={14} className="text-blue-500"/>}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <div className={`px-4 py-3 flex justify-between items-center border-b border-gray-100 ${match.winner === match.p1 ? 'bg-blue-50' : ''}`}>
+                                                            <span className={`text-sm font-medium truncate ${!match.p1 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p1}</span>
+                                                            {match.p1 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s1}</span>}
+                                                        </div>
+                                                        <div className={`px-4 py-3 flex justify-between items-center ${match.winner === match.p2 ? 'bg-blue-50' : ''}`}>
+                                                            <span className={`text-sm font-medium truncate ${!match.p2 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p2}</span>
+                                                            {match.p2 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s2}</span>}
+                                                        </div>
+                                                    </>
+                                                )}
+                                                
+                                                {!match.winner && !isSeed && (
+                                                    <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity flex items-center justify-center pointer-events-none">
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white border-t p-4 flex justify-center safe-area-pb">
+                        <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform">
+                            <Icons.Download size={16}/> 列印 / 存成 PDF
+                        </button>
+                    </div>
+                </div>
+            );
+
+            const renderMatchView = () => {
+                if (!activeMatchParams) return null;
+                const { rIndex, mIndex } = activeMatchParams;
+                const match = rounds[rIndex][mIndex];
+
+                if (match.type === 'normal') {
+                    return (
+                        <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
+                            <div className="bg-white shadow-sm p-4 flex items-center justify-between">
+                                <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
+                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />對戰計分</h2>
+                                <div className="w-10"></div>
+                            </div>
+                            <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+                                <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
+                                    <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
+                                    <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
+                                    <div className="flex items-center gap-6">
+                                        <button onClick={() => updateMatchScore(null, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
+                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{match.s1}</div>
+                                        <button onClick={() => updateMatchScore(null, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
+                                    </div>
+                                    {match.s1 >= 4 && match.winner === match.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
+                                </div>
+                                <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
+                                <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${match.winner === match.p2 ? 'bg-blue-50' : 'bg-white'}`}>
+                                    <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p2}</div>
+                                    <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
+                                    <div className="flex items-center gap-6">
+                                        <button onClick={() => updateMatchScore(null, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
+                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{match.s2}</div>
+                                        <button onClick={() => updateMatchScore(null, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
+                                    </div>
+                                    {match.s2 >= 4 && match.winner === match.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
+                                </div>
+                            </div>
+                            <div className="bg-white border-t p-6 flex justify-center safe-area-pb"><button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform"><Icons.CheckCircle size={24} /> 確認結果</button></div>
+                        </div>
+                    );
+                } else {
+                    return (
+                        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-fade-in overflow-y-auto">
+                            <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-20">
+                                <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
+                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.List className="text-blue-500" size={20} />循環賽積分表</h2>
+                                <div className="w-10"></div>
+                            </div>
+                            
+                            <div className="p-4 max-w-3xl mx-auto w-full space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                    <div className="bg-blue-600 text-white p-3 font-bold text-center">即時戰績</div>
+                                    <div className="p-4">
+                                        <div className="grid grid-cols-4 gap-2 text-sm text-gray-500 border-b pb-2 mb-2 font-bold text-center">
+                                            <div className="text-left pl-2">選手</div>
+                                            <div>勝</div>
+                                            <div>分</div>
+                                            <div>狀態</div>
+                                        </div>
+                                        {[match.p1, match.p2, match.p3].map(p => {
+                                            let wins = 0;
+                                            let score = 0;
+                                            match.subMatches.forEach(sub => {
+                                                if (sub.winner === p) wins++;
+                                                if (sub.p1 === p) score += sub.s1;
+                                                if (sub.p2 === p) score += sub.s2;
+                                            });
+                                            return (
+                                                <div key={p} className="grid grid-cols-4 gap-2 items-center py-2 text-center">
+                                                    <div className="text-left pl-2 font-bold text-gray-800 truncate">{p}</div>
+                                                    <div className="font-mono">{wins}</div>
+                                                    <div className="font-mono text-gray-400">{score}</div>
+                                                    <div>
+                                                        {calculateRR3Winner(match) === p && <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded-full font-bold">目前領先</span>}
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4 pb-20">
+                                    {match.subMatches.map((sub, idx) => (
+                                        <div key={sub.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                                            <div className="text-xs font-bold text-gray-400 mb-2 text-center">GAME {idx + 1}</div>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex flex-col items-center flex-1">
+                                                    <div className={`font-bold text-lg mb-2 text-center break-words w-full ${sub.winner===sub.p1 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p1}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button onClick={() => updateMatchScore(sub.id, true, -1)} className="w-8 h-8 rounded-full bg-gray-100 active:bg-gray-200 flex items-center justify-center font-bold">-</button>
+                                                        <span className="text-2xl font-bold w-8 text-center">{sub.s1}</span>
+                                                        <button onClick={() => updateMatchScore(sub.id, true, 1)} className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 active:bg-blue-200 flex items-center justify-center font-bold">+</button>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="font-black text-gray-200 text-xl">VS</div>
+
+                                                <div className="flex flex-col items-center flex-1">
+                                                    <div className={`font-bold text-lg mb-2 text-center break-words w-full ${sub.winner===sub.p2 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p2}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button onClick={() => updateMatchScore(sub.id, false, -1)} className="w-8 h-8 rounded-full bg-gray-100 active:bg-gray-200 flex items-center justify-center font-bold">-</button>
+                                                        <span className="text-2xl font-bold w-8 text-center">{sub.s2}</span>
+                                                        <button onClick={() => updateMatchScore(sub.id, false, 1)} className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 active:bg-blue-200 flex items-center justify-center font-bold">+</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            
+                            <div className="bg-white border-t p-4 fixed bottom-0 left-0 right-0 flex justify-center safe-area-pb">
+                                <button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-3 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
+                                    <Icons.CheckCircle size={20} /> 完成並晉級
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-blue-100 flex flex-col">
+                    {view !== 'match' && (
+                        <header className="bg-white shadow-sm sticky top-0 z-10">
+                            <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                    <Icons.Trophy className="text-yellow-500" size={24} />
+                                    <h1 className="text-xl font-bold tracking-tight text-gray-800">混合賽制產生器</h1>
+                                </div>
+                                {view === 'bracket' && (
+                                    <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-red-500 transition-colors"><Icons.RotateCcw size={16} /> 重新設定</button>
+                                )}
+                            </div>
+                        </header>
+                    )}
+
+                    <main className="flex-1 w-full max-w-7xl mx-auto p-4 overflow-hidden">
+                        {view === 'setup' && renderSetup()}
+                        {view === 'bracket' && renderBracket()}
+                        {view === 'match' && renderMatchView()}
+                    </main>
+
+                    {showResetConfirm && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center animate-fade-in p-4">
+                            <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 text-center">
+                                <h3 className="text-lg font-bold text-gray-800 mb-2">確定要重新開始？</h3>
+                                <p className="text-gray-500 mb-6 text-sm">目前的賽程與比分將會完全重置。</p>
+                                <div className="flex gap-3 justify-center">
+                                    <button onClick={() => setShowResetConfirm(false)} className="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 font-medium">取消</button>
+                                    <button onClick={executeReset} className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white font-bold shadow-lg shadow-red-200">確定重置</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {alertInfo.show && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center animate-fade-in p-4">
+                            <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 text-center">
+                                <div className="mx-auto w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4">
+                                    <Icons.AlertCircle size={24} />
+                                </div>
+                                <p className="text-gray-800 font-medium mb-6">{alertInfo.message}</p>
+                                <button onClick={() => setAlertInfo({ show: false, message: '' })} className="w-full px-4 py-2 rounded-lg bg-gray-800 hover:bg-black text-white font-bold">我知道了</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
