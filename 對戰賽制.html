@@ -18,8 +18,10 @@
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes bounce-in { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }
+        @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         .animate-bounce-in { animation: bounce-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans">
@@ -106,7 +108,6 @@
                     lines = Array.from({ length: count }, (_, i) => `${i + 1}號`);
                 }
 
-                // *** 修改點：第一輪進行隨機洗牌 ***
                 let players = shuffleArray([...lines]);
 
                 const round1Matches = [];
@@ -127,7 +128,7 @@
                         });
                         i += 2;
                     } else {
-                        // 落單 (因為已洗牌，這算是隨機輪空)
+                        // 落單
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'seed',
@@ -150,7 +151,6 @@
                 const currentRoundIdx = currentRounds.length - 1;
                 const currentRound = currentRounds[currentRoundIdx];
 
-                // 取得晉級者 (保持上一輪的晉級順序)
                 const winners = [];
                 currentRound.forEach(m => {
                     if (m.winner) winners.push(m.winner);
@@ -161,7 +161,6 @@
                 let nextMatches = [];
                 const nextRoundIndex = currentRounds.length;
 
-                // 特殊規則：3人循環賽
                 if (winners.length === 3) {
                     const p1 = winners[0];
                     const p2 = winners[1];
@@ -180,20 +179,15 @@
                         ]
                     });
                 } else {
-                    // 一般規則：保持順序，但若奇數則隨機抽一人輪空
-                    
-                    let pairingPool = [...winners]; // 複製一份名單 (保持原順序)
+                    let pairingPool = [...winners]; 
                     let byePlayer = null;
 
-                    // 如果人數是奇數 (且不是3人)，隨機抽一個人出來當種子
                     if (pairingPool.length % 2 !== 0) {
                         const randomIndex = Math.floor(Math.random() * pairingPool.length);
                         byePlayer = pairingPool[randomIndex];
-                        // 從配對池中移除這個人，其他人順序不變 (Array.splice 會改變原陣列)
                         pairingPool.splice(randomIndex, 1);
                     }
 
-                    // 剩下的依序配對
                     let i = 0;
                     while (i < pairingPool.length) {
                         const p1 = pairingPool[i];
@@ -210,7 +204,6 @@
                             });
                             i += 2;
                         } else {
-                            // 這裡理論上不會跑到，因為奇數已經被上面的邏輯抽走了
                             nextMatches.push({
                                 id: `r${nextRoundIndex}-m${nextMatches.length}`,
                                 type: 'seed',
@@ -222,7 +215,6 @@
                         }
                     }
 
-                    // 如果有隨機抽出的輪空者，加在最後面
                     if (byePlayer) {
                         nextMatches.push({
                             id: `r${nextRoundIndex}-m${nextMatches.length}`,
@@ -236,7 +228,6 @@
                 return nextMatches;
             };
 
-            // 按鈕觸發的生成下一輪
             const handleGenerateNextRound = () => {
                 const nextMatches = createNextRoundMatches(rounds);
                 if (nextMatches) {
@@ -245,11 +236,9 @@
                 }
             };
 
-            // --- 自動化監聽 (useEffect) ---
             useEffect(() => {
                 if (rounds.length === 0) return;
                 
-                // 檢查最後一輪是否結束
                 const currentRound = rounds[rounds.length - 1];
                 const allFinished = currentRound.every(m => m.winner !== null);
 
@@ -257,26 +246,21 @@
                     const winners = currentRound.map(m => m.winner).filter(w => w);
                     
                     if (winners.length === 1) {
-                        // 情況 A: 只剩 1 人 -> 冠軍誕生
                         setWinner(winners[0]);
                         setNextRoundReady(false);
                     } else if (winners.length === 2) {
-                        // 情況 B: 剩 2 人 -> 自動生成決賽
                         const nextMatches = createNextRoundMatches(rounds);
                         if (nextMatches) {
                             setRounds(prev => [...prev, nextMatches]);
                             setNextRoundReady(false);
                         }
                     } else {
-                        // 情況 C: 剩 3人以上 -> 顯示按鈕
                         setNextRoundReady(true);
                     }
                 } else {
                     setNextRoundReady(false);
                 }
             }, [rounds, winner]);
-
-            // --- 互動邏輯 ---
 
             const openMatchView = (rIndex, mIndex) => {
                 const match = rounds[rIndex][mIndex];
@@ -409,7 +393,9 @@
                                             value={inputText}
                                             onChange={(e) => setInputText(e.target.value)}
                                         />
-                                        <button onClick={handleSampleData} className="text-xs text-blue-500 hover:underline mt-2">帶入範例 (11人)</button>
+                                        <div className="flex justify-between mt-2">
+                                            <button onClick={handleSampleData} className="text-xs text-blue-500 hover:underline">帶入範例</button>
+                                        </div>
                                     </>
                                 ) : (
                                     <div className="py-8 flex flex-col items-center">
@@ -554,7 +540,7 @@
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />對戰計分</h2>
                                 <div className="w-10"></div>
                             </div>
-                            <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
                                     <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -577,10 +563,19 @@
                                     {match.s2 >= 4 && match.winner === match.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
                             </div>
-                            <div className="bg-white border-t p-6 flex justify-center safe-area-pb"><button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform"><Icons.CheckCircle size={24} /> 確認結果</button></div>
+                            
+                            {/* 確認按鈕：只有在分出勝負後才顯示，且懸浮於底部，避免擋住內容 */}
+                            {match.winner && (
+                                <div className="bg-white border-t p-6 flex justify-center safe-area-pb animate-slide-up shadow-2xl z-20">
+                                    <button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
+                                        <Icons.CheckCircle size={24} /> 確認結果
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     );
                 } else {
+                    // RR3 View
                     return (
                         <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-fade-in overflow-y-auto">
                             <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-20">
@@ -621,7 +616,7 @@
                                     </div>
                                 </div>
 
-                                <div className="space-y-4 pb-20">
+                                <div className="space-y-4 pb-32"> {/* 增加底部空間，防止被按鈕擋住 */}
                                     {match.subMatches.map((sub, idx) => (
                                         <div key={sub.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                                             <div className="text-xs font-bold text-gray-400 mb-2 text-center">GAME {idx + 1}</div>
@@ -651,7 +646,8 @@
                                 </div>
                             </div>
                             
-                            <div className="bg-white border-t p-4 fixed bottom-0 left-0 right-0 flex justify-center safe-area-pb">
+                            {/* RR3 確認按鈕：同樣改為動態顯示 */}
+                            <div className="bg-white border-t p-4 fixed bottom-0 left-0 right-0 flex justify-center safe-area-pb shadow-2xl z-20">
                                 <button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-3 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
                                     <Icons.CheckCircle size={20} /> 完成並晉級
                                 </button>
