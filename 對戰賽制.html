@@ -93,7 +93,7 @@
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
             const [screenshotImage, setScreenshotImage] = useState(null); 
-            const [screenshotBlob, setScreenshotBlob] = useState(null); // New state for blob
+            const [screenshotBlob, setScreenshotBlob] = useState(null); 
             const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
             const contentRef = useRef(null); 
 
@@ -126,13 +126,11 @@
 
                 setIsScreenshotLoading(true);
 
-                // 1. 準備截圖環境
                 const originalBg = contentRef.current.style.background;
                 const originalOverflow = contentRef.current.style.overflow;
                 contentRef.current.style.background = "#f9fafb"; 
-                contentRef.current.style.overflow = "visible"; // 展開
+                contentRef.current.style.overflow = "visible"; 
 
-                // 計算完整寬高
                 const scrollableContainer = contentRef.current.querySelector('.overflow-x-auto');
                 let totalWidth = contentRef.current.scrollWidth;
                 if (scrollableContainer) {
@@ -152,11 +150,10 @@
                         x: 0, y: 0, scrollX: 0, scrollY: 0
                     });
                     
-                    // 2. 生成 Blob 和 URL
                     canvas.toBlob((blob) => {
                         const url = URL.createObjectURL(blob);
                         setScreenshotImage(url); 
-                        setScreenshotBlob(blob); // 儲存 Blob 供按鈕使用
+                        setScreenshotBlob(blob); 
                         setIsScreenshotLoading(false);
                     }, 'image/png');
 
@@ -170,14 +167,12 @@
                 }
             };
 
-            // --- 處理儲存/分享按鈕點擊 ---
             const handleSaveAction = async () => {
                 if (!screenshotBlob) return;
 
                 const fileName = `bracket_${new Date().getTime()}.png`;
                 const file = new File([screenshotBlob], fileName, { type: 'image/png' });
 
-                // 優先嘗試原生分享 (Web Share API Level 2)
                 if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
                     try {
                         await navigator.share({
@@ -190,12 +185,11 @@
                         if (error.name !== 'AbortError') {
                             console.log("Share failed, fallback to download");
                         } else {
-                            return; // User cancelled share
+                            return; 
                         }
                     }
                 }
 
-                // Fallback: 直接下載
                 const link = document.createElement('a');
                 link.download = fileName;
                 link.href = screenshotImage;
@@ -204,7 +198,7 @@
                 document.body.removeChild(link);
             };
 
-            // --- 核心邏輯 1: 初始化第一輪 (洗牌隨機對戰) ---
+            // --- 核心邏輯 ---
             const generateFirstRound = () => {
                 let lines = [];
                 if (inputMode === 'text') {
@@ -259,18 +253,16 @@
                 setView('bracket');
             };
 
-            // --- 核心邏輯 2: 生成下一輪 ---
             const createNextRoundMatches = (currentRounds) => {
                 const currentRoundIdx = currentRounds.length - 1;
                 const currentRound = currentRounds[currentRoundIdx];
 
                 const winners = [];
-                const losers = []; // Track losers for Bronze match logic
+                const losers = [];
 
                 currentRound.forEach(m => {
                     if (m.winner) {
                         winners.push(m.winner);
-                        // Identify loser if it was a normal match
                         if (m.type === 'normal') {
                             losers.push(m.winner === m.p1 ? m.p2 : m.p1);
                         }
@@ -282,10 +274,7 @@
                 let nextMatches = [];
                 const nextRoundIndex = currentRounds.length;
 
-                // --- 4人特別規則：冠軍賽 + 季軍賽 ---
-                // 檢查條件：本輪是準決賽 (2場 normal 對戰)，且產生了2位贏家和2位輸家
                 if (currentRound.length === 2 && currentRound.every(m => m.type === 'normal')) {
-                    // Winners -> Final
                     nextMatches.push({
                         id: `r${nextRoundIndex}-final`,
                         type: 'final', 
@@ -295,7 +284,6 @@
                         round: nextRoundIndex
                     });
                     
-                    // Losers -> Bronze
                     nextMatches.push({
                         id: `r${nextRoundIndex}-bronze`,
                         type: 'bronze', 
@@ -308,7 +296,6 @@
                     return nextMatches;
                 }
 
-                // --- 3人特別規則：3人循環賽 ---
                 if (winners.length === 3) {
                     const p1 = winners[0];
                     const p2 = winners[1];
@@ -327,7 +314,6 @@
                         ]
                     });
                 } else {
-                    // --- 一般規則 ---
                     let pairingPool = [...winners]; 
                     
                     if (nextRoundIndex === 1 && shuffleRound2) {
@@ -390,7 +376,6 @@
                 }
             };
 
-            // --- 自動化監聽 ---
             useEffect(() => {
                 if (rounds.length === 0) return;
                 
@@ -400,11 +385,9 @@
                 if (allFinished && !winner) {
                     const winners = currentRound.map(m => m.winner).filter(w => w);
                     
-                    // Final + Bronze round check
                     const isFinalRound = currentRound.some(m => m.type === 'final');
                     
                     if (isFinalRound) {
-                        // Gather results
                         const finalMatch = currentRound.find(m => m.type === 'final');
                         const bronzeMatch = currentRound.find(m => m.type === 'bronze');
                         
@@ -422,8 +405,6 @@
                         setWinner(winners[0]);
                         setNextRoundReady(false);
                     } else if (winners.length === 2) {
-                        // Check if previous round was semi-finals (4 people)
-                        // If so, createNextRoundMatches handles the special 4-person logic
                         const nextMatches = createNextRoundMatches(rounds);
                         if (nextMatches) {
                             setRounds(prev => [...prev, nextMatches]);
@@ -522,7 +503,6 @@
                 setRounds(newRounds);
             };
 
-            // --- 確認結果 + 自動跳轉下一場 ---
             const confirmMatchResult = () => {
                 if (!activeMatchParams) return;
                 const { rIndex, mIndex } = activeMatchParams;
@@ -541,7 +521,7 @@
                     }
                 } else if (match.type === 'rr3') {
                     const ranking = getRR3Ranking(match);
-                    currentWinner = ranking[0].name; // First place is winner
+                    currentWinner = ranking[0].name; 
                     setFinalResults({
                         first: ranking[0].name,
                         second: ranking[1].name,
@@ -555,7 +535,6 @@
 
                 setRounds(newRounds);
 
-                // Auto Navigation Logic
                 let nextUnfinishedIndex = -1;
                 const currentRoundMatches = newRounds[rIndex];
                 
@@ -595,9 +574,8 @@
                 setShowResetConfirm(false);
             };
 
-            // Renders
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-10 animate-fade-in safe-area-pt">
+                <div className="max-w-lg mx-auto mt-10 animate-fade-in safe-area-pt pb-20">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
@@ -665,7 +643,6 @@
 
             const renderBracket = () => (
                 <div className="flex flex-col h-full safe-area-pt">
-                    {/* Wrap everything in a scrollable flex container for screenshot. Add data attribute for ref finding. */}
                     <div className="flex-1 flex flex-col overflow-hidden relative" ref={contentRef} data-screenshot-target="true">
                         {winner && (
                             <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0">
