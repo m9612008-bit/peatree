@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>混合賽制產生器</title>
     
-    <!-- 引入 React 和 Tailwind -->
+    <!-- 引入 React, Tailwind 和 html2canvas (截圖用) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     
     <style>
         /* 手機優化 */
@@ -22,6 +23,7 @@
         .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         .animate-bounce-in { animation: bounce-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
         .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
+        .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans">
@@ -43,6 +45,7 @@
             Shuffle: (p) => <Icon {...p} path={<><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/></>} />,
             RotateCcw: (p) => <Icon {...p} path={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />,
             Download: (p) => <Icon {...p} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></>} />,
+            Camera: (p) => <Icon {...p} path={<><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></>} />,
             Info: (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></>} />,
             List: (p) => <Icon {...p} path={<><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></>} />,
             Hash: (p) => <Icon {...p} path={<><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></>} />,
@@ -54,7 +57,8 @@
             LayoutList: (p) => <Icon {...p} path={<><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 4h7"/><path d="M14 9h7"/><path d="M14 15h7"/><path d="M14 20h7"/></>} />,
             AlertCircle: (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></>} />,
             Crown: (p) => <Icon {...p} path={<><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></>} />,
-            Zap: (p) => <Icon {...p} path={<><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></>} />
+            Zap: (p) => <Icon {...p} path={<><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></>} />,
+            Medal: (p) => <Icon {...p} path={<><path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/></>} />
         };
 
         // --- Main App Component ---
@@ -65,12 +69,16 @@
             const [inputCount, setInputCount] = useState(11); 
             const [rounds, setRounds] = useState([]); 
             const [winner, setWinner] = useState(null);
-            // activeMatchParams: { rIndex, mIndex, subMatchIndex (optional) }
+            const [rr3Rankings, setRr3Rankings] = useState(null); // Store full RR3 results
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
+            
+            // New Setting
+            const [shuffleRound2, setShuffleRound2] = useState(false);
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
+            const contentRef = useRef(null); // Ref for screenshot
 
             const handleSampleData = () => {
                 const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`);
@@ -89,6 +97,34 @@
 
             const showAlert = (msg) => {
                 setAlertInfo({ show: true, message: msg });
+            };
+
+            // --- 截圖功能 ---
+            const handleScreenshot = async () => {
+                if (!contentRef.current) return;
+                
+                const originalBg = contentRef.current.style.background;
+                contentRef.current.style.background = "#f9fafb"; // Ensure white/gray bg
+
+                try {
+                    const canvas = await html2canvas(contentRef.current, {
+                        scale: 2, 
+                        useCORS: true,
+                        logging: false,
+                        windowWidth: contentRef.current.scrollWidth,
+                        windowHeight: contentRef.current.scrollHeight
+                    });
+                    
+                    const link = document.createElement('a');
+                    link.download = `賽程表_${new Date().getTime()}.png`;
+                    link.href = canvas.toDataURL();
+                    link.click();
+                } catch (err) {
+                    console.error("Screenshot failed", err);
+                    showAlert("截圖失敗，請手動截圖");
+                } finally {
+                    contentRef.current.style.background = originalBg;
+                }
             };
 
             // --- 核心邏輯 1: 初始化第一輪 (洗牌隨機對戰) ---
@@ -118,7 +154,6 @@
                     const p2 = players[i+1]; 
 
                     if (p2) {
-                        // 成對
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'normal',
@@ -129,7 +164,6 @@
                         });
                         i += 2;
                     } else {
-                        // 落單
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'seed',
@@ -143,11 +177,12 @@
 
                 setRounds([round1Matches]);
                 setWinner(null);
+                setRr3Rankings(null);
                 setNextRoundReady(false);
                 setView('bracket');
             };
 
-            // --- 核心邏輯 2: 生成下一輪 (保持順序 + 隨機抽輪空) ---
+            // --- 核心邏輯 2: 生成下一輪 ---
             const createNextRoundMatches = (currentRounds) => {
                 const currentRoundIdx = currentRounds.length - 1;
                 const currentRound = currentRounds[currentRoundIdx];
@@ -181,6 +216,11 @@
                     });
                 } else {
                     let pairingPool = [...winners]; 
+                    
+                    if (nextRoundIndex === 1 && shuffleRound2) {
+                        pairingPool = shuffleArray(pairingPool);
+                    }
+
                     let byePlayer = null;
 
                     if (pairingPool.length % 2 !== 0) {
@@ -237,6 +277,7 @@
                 }
             };
 
+            // --- 自動化監聽 ---
             useEffect(() => {
                 if (rounds.length === 0) return;
                 
@@ -266,20 +307,17 @@
             const openMatchView = (rIndex, mIndex) => {
                 const match = rounds[rIndex][mIndex];
                 if (match.type === 'seed') return; 
-                // 這裡不需要 subMatchIndex，因為 RR3 是進入總覽頁
                 setActiveMatchParams({ rIndex, mIndex });
                 setView('match');
             };
 
             const openSubMatchView = (subMatchIndex) => {
-                // 從 RR3 總覽頁進入子比賽計分
                 if (!activeMatchParams) return;
                 setActiveMatchParams({ ...activeMatchParams, subMatchIndex });
-                setView('subMatch'); // 新增一個 view 狀態
+                setView('subMatch');
             };
 
             const closeSubMatchView = () => {
-                // 返回 RR3 總覽頁
                 if (!activeMatchParams) return;
                 const newParams = { ...activeMatchParams };
                 delete newParams.subMatchIndex;
@@ -287,7 +325,8 @@
                 setView('match');
             };
 
-            const calculateRR3Winner = (match) => {
+            // --- RR3 排名計算 (回傳完整排名 Array) ---
+            const getRR3Ranking = (match) => {
                 const stats = {};
                 [match.p1, match.p2, match.p3].forEach(p => {
                     stats[p] = { name: p, wins: 0, score: 0 };
@@ -299,12 +338,10 @@
                     stats[sub.p2].score += sub.s2;
                 });
 
-                const ranking = Object.values(stats).sort((a, b) => {
+                return Object.values(stats).sort((a, b) => {
                     if (b.wins !== a.wins) return b.wins - a.wins;
                     return b.score - a.score;
                 });
-
-                return ranking[0].name;
             };
 
             const updateMatchScore = (targetId, isP1, delta) => {
@@ -348,6 +385,7 @@
                 setRounds(newRounds);
             };
 
+            // --- 確認結果 + 自動跳轉下一場 ---
             const confirmMatchResult = () => {
                 if (!activeMatchParams) return;
                 const { rIndex, mIndex } = activeMatchParams;
@@ -365,7 +403,9 @@
                         else if (match.s2 > match.s1) currentWinner = match.p2;
                     }
                 } else if (match.type === 'rr3') {
-                    currentWinner = calculateRR3Winner(match);
+                    const ranking = getRR3Ranking(match);
+                    currentWinner = ranking[0].name; // First place is winner
+                    setRr3Rankings(ranking);
                 }
 
                 if (currentWinner) {
@@ -373,14 +413,43 @@
                 }
 
                 setRounds(newRounds);
-                setView('bracket');
-                setActiveMatchParams(null);
+
+                // Auto Navigation
+                let nextUnfinishedIndex = -1;
+                const currentRoundMatches = newRounds[rIndex];
+                
+                if (match.type === 'normal') {
+                    for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
+                        const m = currentRoundMatches[i];
+                        if (m.type !== 'seed' && !m.winner) {
+                            nextUnfinishedIndex = i;
+                            break;
+                        }
+                    }
+                    if (nextUnfinishedIndex === -1) {
+                        for (let i = 0; i < mIndex; i++) {
+                            const m = currentRoundMatches[i];
+                            if (m.type !== 'seed' && !m.winner) {
+                                nextUnfinishedIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (nextUnfinishedIndex !== -1 && match.type === 'normal') {
+                    setActiveMatchParams({ rIndex, mIndex: nextUnfinishedIndex });
+                } else {
+                    setView('bracket');
+                    setActiveMatchParams(null);
+                }
             };
             
             const executeReset = () => {
                 setView('setup');
                 setRounds([]);
                 setWinner(null);
+                setRr3Rankings(null);
                 setNextRoundReady(false);
                 setShowResetConfirm(false);
             };
@@ -425,10 +494,23 @@
                                     </div>
                                 )}
                             </div>
+
+                            <div className="flex items-center mb-6 bg-gray-50 p-3 rounded-lg">
+                                <input 
+                                    id="shuffleRound2" 
+                                    type="checkbox" 
+                                    checked={shuffleRound2}
+                                    onChange={(e) => setShuffleRound2(e.target.checked)}
+                                    className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor="shuffleRound2" className="ml-2 text-sm text-gray-700 font-medium select-none">
+                                    第二輪重新抽籤 (增加隨機性)
+                                </label>
+                            </div>
                             
                             <div className="bg-blue-50 p-3 rounded-lg mb-4 text-xs text-blue-700 space-y-1">
                                 <div className="flex gap-2"><Icons.Shuffle size={14} className="mt-0.5"/> <span><strong>第一輪</strong>：隨機洗牌後配對。</span></div>
-                                <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對，若為奇數隨機抽輪空。</span></div>
+                                <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對 (若勾選則第2輪再洗牌)。</span></div>
                                 <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>三人循環</strong>：若該輪剩 3 人，自動轉為循環賽。</span></div>
                             </div>
 
@@ -443,10 +525,28 @@
             const renderBracket = () => (
                 <div className="flex flex-col h-full">
                     {winner && (
-                        <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm">
+                        <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center">
                             <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
-                            <h2 className="text-3xl font-extrabold text-yellow-700">冠軍誕生！</h2>
-                            <p className="text-xl mt-2 text-yellow-800 font-medium">{winner}</p>
+                            <h2 className="text-3xl font-extrabold text-yellow-700">比賽結束！</h2>
+                            
+                            {rr3Rankings ? (
+                                <div className="mt-6 w-full max-w-xs space-y-3">
+                                    <div className="bg-yellow-100 p-3 rounded-lg border border-yellow-200 flex items-center justify-between">
+                                        <div className="flex items-center gap-2"><Icons.Medal className="text-yellow-600" size={20}/> <span className="font-bold text-yellow-800">冠軍</span></div>
+                                        <span className="font-bold text-lg">{rr3Rankings[0].name}</span>
+                                    </div>
+                                    <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 flex items-center justify-between">
+                                        <div className="flex items-center gap-2"><Icons.Medal className="text-gray-500" size={20}/> <span className="font-bold text-gray-600">亞軍</span></div>
+                                        <span className="font-bold text-lg">{rr3Rankings[1].name}</span>
+                                    </div>
+                                    <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 flex items-center justify-between">
+                                        <div className="flex items-center gap-2"><Icons.Medal className="text-orange-600" size={20}/> <span className="font-bold text-orange-800">季軍</span></div>
+                                        <span className="font-bold text-lg">{rr3Rankings[2].name}</span>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-xl mt-2 text-yellow-800 font-medium">總冠軍：{winner}</p>
+                            )}
                         </div>
                     )}
 
@@ -462,7 +562,7 @@
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-x-auto pb-12 no-scrollbar">
+                    <div className="flex-1 overflow-x-auto pb-12 no-scrollbar" id="bracket-container" ref={contentRef}>
                         <div className="inline-flex min-w-full p-4 gap-4 justify-center">
                             {rounds.map((round, rIndex) => (
                                 <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
@@ -538,8 +638,8 @@
                     </div>
                     
                     <div className="bg-white border-t p-4 flex justify-center safe-area-pb">
-                        <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform">
-                            <Icons.Download size={16}/> 列印 / 存成 PDF
+                        <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform mr-2">
+                            <Icons.Download size={16}/> 列印 PDF
                         </button>
                     </div>
                 </div>
@@ -582,19 +682,20 @@
                                 </div>
                             </div>
                             
-                            {/* 確認按鈕：只有在分出勝負後才顯示，且懸浮於底部，避免擋住內容 */}
                             {match.winner && (
                                 <div className="bg-white border-t p-6 flex justify-center safe-area-pb animate-slide-up shadow-2xl z-20">
                                     <button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
-                                        <Icons.CheckCircle size={24} /> 確認結果
+                                        <Icons.CheckCircle size={24} /> 確認並下一場
                                     </button>
                                 </div>
                             )}
                         </div>
                     );
                 } else {
-                    // RR3 View
                     const allSubMatchesFinished = match.subMatches.every(sub => sub.winner !== null);
+                    // Determine current leader dynamically based on stats
+                    const ranking = getRR3Ranking(match);
+                    const currentLeader = ranking[0].name;
 
                     return (
                         <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-fade-in">
@@ -605,7 +706,6 @@
                             </div>
                             
                             <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6">
-                                {/* Stats Table */}
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                     <div className="bg-blue-600 text-white p-3 font-bold text-center">即時戰績</div>
                                     <div className="p-4">
@@ -629,7 +729,7 @@
                                                     <div className="font-mono">{wins}</div>
                                                     <div className="font-mono text-gray-400">{score}</div>
                                                     <div>
-                                                        {calculateRR3Winner(match) === p && <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded-full font-bold">目前領先</span>}
+                                                        {currentLeader === p && <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded-full font-bold">目前領先</span>}
                                                     </div>
                                                 </div>
                                             )
@@ -637,7 +737,6 @@
                                     </div>
                                 </div>
 
-                                {/* Matches */}
                                 <div className="space-y-4 pb-4">
                                     {match.subMatches.map((sub, idx) => (
                                         <div 
@@ -664,14 +763,12 @@
                                                     <div className="text-2xl font-bold text-gray-600">{sub.s2}</div>
                                                 </div>
                                             </div>
-                                            {/* Touch Ripple Effect Overlay */}
                                             <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity pointer-events-none"></div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                             
-                            {/* RR3 確認按鈕：只有在所有比賽打完後才顯示 */}
                             {allSubMatchesFinished && (
                                 <div className="bg-white border-t p-4 flex justify-center safe-area-pb shadow-2xl z-20 animate-slide-up flex-shrink-0">
                                     <button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-3 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
@@ -684,7 +781,6 @@
                 }
             };
 
-            // --- New: Render Sub Match View (for RR3 individual games) ---
             const renderSubMatchView = () => {
                 if (!activeMatchParams || activeMatchParams.subMatchIndex === undefined) return null;
                 
@@ -692,9 +788,6 @@
                 const parentMatch = rounds[rIndex][mIndex];
                 const subMatch = parentMatch.subMatches[subMatchIndex];
 
-                // We reuse updateMatchScore logic but need to target the subMatch ID
-                // The existing updateMatchScore handles subMatch ID targeting
-                
                 return (
                     <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
                         <div className="bg-white shadow-sm p-4 flex items-center justify-between">
@@ -726,7 +819,6 @@
                             </div>
                         </div>
                         
-                        {/* 返回按鈕 (無論是否完賽都顯示，方便中途退出) */}
                         <div className="bg-white border-t p-6 flex justify-center safe-area-pb animate-slide-up shadow-2xl z-20">
                             <button onClick={closeSubMatchView} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
                                 <Icons.CheckCircle size={24} /> {subMatch.winner ? '確認並返回' : '返回總覽'}
@@ -745,9 +837,14 @@
                                     <Icons.Trophy className="text-yellow-500" size={24} />
                                     <h1 className="text-xl font-bold tracking-tight text-gray-800">混合賽制產生器</h1>
                                 </div>
-                                {view === 'bracket' && (
-                                    <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-red-500 transition-colors"><Icons.RotateCcw size={16} /> 重新設定</button>
-                                )}
+                                <div className="flex items-center gap-3">
+                                    <button onClick={handleScreenshot} className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-500 transition-colors" title="截圖">
+                                        <Icons.Camera size={20} />
+                                    </button>
+                                    {view === 'bracket' && (
+                                        <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-red-500 transition-colors"><Icons.RotateCcw size={16} /> 重新設定</button>
+                                    )}
+                                </div>
                             </div>
                         </header>
                     )}
