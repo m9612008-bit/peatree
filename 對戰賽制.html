@@ -58,7 +58,8 @@
             AlertCircle: (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></>} />,
             Crown: (p) => <Icon {...p} path={<><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></>} />,
             Zap: (p) => <Icon {...p} path={<><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></>} />,
-            Medal: (p) => <Icon {...p} path={<><path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/></>} />
+            Medal: (p) => <Icon {...p} path={<><path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/></>} />,
+            Forward: (p) => <Icon {...p} path={<><polyline points="9 18 15 12 9 6"/></>} />
         };
 
         // --- Main App Component ---
@@ -69,7 +70,7 @@
             const [inputCount, setInputCount] = useState(11); 
             const [rounds, setRounds] = useState([]); 
             const [winner, setWinner] = useState(null);
-            const [rr3Rankings, setRr3Rankings] = useState(null); // Store full RR3 results
+            const [rr3Rankings, setRr3Rankings] = useState(null); 
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             
@@ -99,12 +100,12 @@
                 setAlertInfo({ show: true, message: msg });
             };
 
-            // --- 截圖功能 ---
+            // --- 截圖功能 (優化版) ---
             const handleScreenshot = async () => {
                 if (!contentRef.current) return;
                 
                 const originalBg = contentRef.current.style.background;
-                contentRef.current.style.background = "#f9fafb"; // Ensure white/gray bg
+                contentRef.current.style.background = "#f9fafb"; // Ensure background color
 
                 try {
                     const canvas = await html2canvas(contentRef.current, {
@@ -115,16 +116,53 @@
                         windowHeight: contentRef.current.scrollHeight
                     });
                     
-                    const link = document.createElement('a');
-                    link.download = `賽程表_${new Date().getTime()}.png`;
-                    link.href = canvas.toDataURL();
-                    link.click();
+                    contentRef.current.style.background = originalBg; // Restore
+
+                    // 嘗試轉換為 Blob 並分享
+                    canvas.toBlob(async (blob) => {
+                        if (!blob) {
+                            showAlert("截圖生成失敗");
+                            return;
+                        }
+                        
+                        const fileName = `bracket_${new Date().getTime()}.png`;
+                        const file = new File([blob], fileName, { type: 'image/png' });
+                        
+                        // 優先使用 Web Share API (手機原生分享)
+                        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                            try {
+                                await navigator.share({
+                                    files: [file],
+                                    title: '賽程表',
+                                    text: '這是目前的賽程表'
+                                });
+                            } catch (error) {
+                                // 如果使用者取消分享，不需報錯
+                                if (error.name !== 'AbortError') {
+                                    console.error("Share failed", error);
+                                    // Fallback to download
+                                    downloadBlob(blob, fileName);
+                                }
+                            }
+                        } else {
+                            // Fallback for desktop or non-supported browsers
+                            downloadBlob(blob, fileName);
+                        }
+                    });
+
                 } catch (err) {
                     console.error("Screenshot failed", err);
-                    showAlert("截圖失敗，請手動截圖");
-                } finally {
+                    showAlert("截圖失敗，請嘗試手動截圖");
                     contentRef.current.style.background = originalBg;
                 }
+            };
+
+            const downloadBlob = (blob, fileName) => {
+                const link = document.createElement('a');
+                link.download = fileName;
+                link.href = URL.createObjectURL(blob);
+                link.click();
+                URL.revokeObjectURL(link.href);
             };
 
             // --- 核心邏輯 1: 初始化第一輪 (洗牌隨機對戰) ---
@@ -154,6 +192,7 @@
                     const p2 = players[i+1]; 
 
                     if (p2) {
+                        // 成對
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'normal',
@@ -164,6 +203,7 @@
                         });
                         i += 2;
                     } else {
+                        // 落單
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'seed',
@@ -325,7 +365,6 @@
                 setView('match');
             };
 
-            // --- RR3 排名計算 (回傳完整排名 Array) ---
             const getRR3Ranking = (match) => {
                 const stats = {};
                 [match.p1, match.p2, match.p3].forEach(p => {
@@ -342,6 +381,11 @@
                     if (b.wins !== a.wins) return b.wins - a.wins;
                     return b.score - a.score;
                 });
+            };
+
+            const calculateRR3Winner = (match) => {
+                const ranking = getRR3Ranking(match);
+                return ranking[0].name;
             };
 
             const updateMatchScore = (targetId, isP1, delta) => {
@@ -414,7 +458,7 @@
 
                 setRounds(newRounds);
 
-                // Auto Navigation
+                // Auto Navigation Logic
                 let nextUnfinishedIndex = -1;
                 const currentRoundMatches = newRounds[rIndex];
                 
@@ -650,13 +694,43 @@
                 const { rIndex, mIndex } = activeMatchParams;
                 const match = rounds[rIndex][mIndex];
 
+                // Determine next action text
+                let actionText = "完成";
+                if (match.type === 'normal') {
+                    const currentRoundMatches = rounds[rIndex];
+                    let hasNext = false;
+                    for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
+                        if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
+                            hasNext = true; break;
+                        }
+                    }
+                    if (!hasNext) {
+                        for (let i = 0; i < mIndex; i++) {
+                            if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
+                                hasNext = true; break;
+                            }
+                        }
+                    }
+                    if (hasNext) actionText = "下一場";
+                }
+
                 if (match.type === 'normal') {
                     return (
                         <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
-                            <div className="bg-white shadow-sm p-4 flex items-center justify-between">
+                            <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
                                 <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />對戰計分</h2>
-                                <div className="w-10"></div>
+                                <div className="flex justify-end min-w-[4rem]"> 
+                                     {match.winner && (
+                                        <button 
+                                            onClick={confirmMatchResult} 
+                                            className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap"
+                                        >
+                                            <span>{actionText}</span>
+                                            <Icons.CheckCircle size={16} />
+                                        </button>
+                                     )}
+                                </div>
                             </div>
                             <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
@@ -681,28 +755,30 @@
                                     {match.s2 >= 4 && match.winner === match.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
                             </div>
-                            
-                            {match.winner && (
-                                <div className="bg-white border-t p-6 flex justify-center safe-area-pb animate-slide-up shadow-2xl z-20">
-                                    <button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
-                                        <Icons.CheckCircle size={24} /> 確認並下一場
-                                    </button>
-                                </div>
-                            )}
                         </div>
                     );
                 } else {
                     const allSubMatchesFinished = match.subMatches.every(sub => sub.winner !== null);
-                    // Determine current leader dynamically based on stats
                     const ranking = getRR3Ranking(match);
                     const currentLeader = ranking[0].name;
 
                     return (
                         <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-fade-in">
-                            <div className="bg-white shadow-sm p-4 flex items-center justify-between flex-shrink-0 z-20">
+                            <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30 flex-shrink-0">
                                 <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.List className="text-blue-500" size={20} />循環賽積分表</h2>
-                                <div className="w-10"></div>
+                                <div className="flex justify-end min-w-[4rem]">
+                                    {allSubMatchesFinished && (
+                                        <button 
+                                            onClick={confirmMatchResult} 
+                                            className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap"
+                                            title="完成並晉級"
+                                        >
+                                            <span>完成</span>
+                                            <Icons.CheckCircle size={16} />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                             
                             <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6">
@@ -768,14 +844,6 @@
                                     ))}
                                 </div>
                             </div>
-                            
-                            {allSubMatchesFinished && (
-                                <div className="bg-white border-t p-4 flex justify-center safe-area-pb shadow-2xl z-20 animate-slide-up flex-shrink-0">
-                                    <button onClick={confirmMatchResult} className="w-full max-w-md bg-gray-900 text-white py-3 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
-                                        <Icons.CheckCircle size={20} /> 完成並晉級
-                                    </button>
-                                </div>
-                            )}
                         </div>
                     );
                 }
@@ -790,10 +858,21 @@
 
                 return (
                     <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
-                        <div className="bg-white shadow-sm p-4 flex items-center justify-between">
+                        <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
                             <button onClick={closeSubMatchView} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
                             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />循環賽 G{subMatchIndex + 1}</h2>
-                            <div className="w-10"></div>
+                            <div className="flex justify-end min-w-[4rem]">
+                                {subMatch.winner && (
+                                    <button 
+                                        onClick={closeSubMatchView} 
+                                        className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap"
+                                        title="確認並返回"
+                                    >
+                                        <span>確認</span>
+                                        <Icons.CheckCircle size={16} />
+                                    </button>
+                                )}
+                            </div>
                         </div>
                         <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${subMatch.winner === subMatch.p1 ? 'bg-red-50' : 'bg-white'}`}>
@@ -817,12 +896,6 @@
                                 </div>
                                 {subMatch.s2 >= 4 && subMatch.winner === subMatch.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                             </div>
-                        </div>
-                        
-                        <div className="bg-white border-t p-6 flex justify-center safe-area-pb animate-slide-up shadow-2xl z-20">
-                            <button onClick={closeSubMatchView} className="w-full max-w-md bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 shadow-lg flex items-center justify-center gap-2 transition-transform">
-                                <Icons.CheckCircle size={24} /> {subMatch.winner ? '確認並返回' : '返回總覽'}
-                            </button>
                         </div>
                     </div>
                 );
