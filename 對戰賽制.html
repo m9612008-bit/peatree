@@ -45,7 +45,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- Icons Components ---
+        // --- Icons Components (SVG Paths) ---
         const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 {path}
@@ -88,6 +88,7 @@
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             
+            // New Setting
             const [shuffleRound2, setShuffleRound2] = useState(false);
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -225,6 +226,7 @@
                     const p2 = players[i+1]; 
 
                     if (p2) {
+                        // 成對
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'normal',
@@ -235,6 +237,7 @@
                         });
                         i += 2;
                     } else {
+                        // 落單
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'seed',
@@ -1012,7 +1015,7 @@
                         </header>
                     )}
 
-                    <main className="flex-1 w-full max-w-7xl mx-auto p-4 overflow-hidden">
+                    <main className={`flex-1 w-full max-w-7xl mx-auto p-4 ${view === 'setup' ? 'overflow-y-auto' : 'overflow-hidden'}`}>
                         {view === 'setup' && renderSetup()}
                         {view === 'bracket' && renderBracket()}
                         {view === 'match' && renderMatchView()}
