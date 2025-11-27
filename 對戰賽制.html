@@ -69,8 +69,8 @@
             const [inputText, setInputText] = useState('');
             const [inputCount, setInputCount] = useState(11); 
             const [rounds, setRounds] = useState([]); 
-            const [winner, setWinner] = useState(null);
-            const [rr3Rankings, setRr3Rankings] = useState(null); 
+            const [winner, setWinner] = useState(null); // String name of Champion
+            const [finalResults, setFinalResults] = useState(null); // { first, second, third, fourth }
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             
@@ -79,7 +79,8 @@
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
-            const contentRef = useRef(null); // Ref for screenshot
+            const [screenshotImage, setScreenshotImage] = useState(null); // For mobile screenshot modal
+            const contentRef = useRef(null); 
 
             const handleSampleData = () => {
                 const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`);
@@ -100,80 +101,36 @@
                 setAlertInfo({ show: true, message: msg });
             };
 
-            // --- 截圖功能 (優化版) ---
+            // --- 截圖功能 (修正版：彈窗顯示圖片供長按儲存) ---
             const handleScreenshot = async () => {
                 if (!contentRef.current) return;
                 
                 const originalBg = contentRef.current.style.background;
-                contentRef.current.style.background = "#f9fafb"; // Ensure background color
+                contentRef.current.style.background = "#f9fafb"; 
 
-                // 獲取內容的總高度與寬度，包含捲動區域
-                const scrollableChild = contentRef.current.querySelector('.overflow-x-auto');
-                const fullWidth = scrollableChild ? Math.max(scrollableChild.scrollWidth, contentRef.current.scrollWidth) : contentRef.current.scrollWidth;
-                const fullHeight = contentRef.current.scrollHeight;
+                // Hack: momentarily expand container to capture full width/height
+                const originalOverflow = contentRef.current.style.overflow;
+                contentRef.current.style.overflow = "visible";
 
                 try {
                     const canvas = await html2canvas(contentRef.current, {
                         scale: 2, 
                         useCORS: true,
                         logging: false,
-                        width: fullWidth,
-                        height: fullHeight,
-                        windowWidth: fullWidth,
-                        windowHeight: fullHeight,
                         scrollX: 0,
-                        scrollY: 0,
-                        x: 0,
-                        y: 0
+                        scrollY: 0
                     });
                     
-                    contentRef.current.style.background = originalBg; // Restore
-
-                    // 嘗試轉換為 Blob 並分享
-                    canvas.toBlob(async (blob) => {
-                        if (!blob) {
-                            showAlert("截圖生成失敗");
-                            return;
-                        }
-                        
-                        const fileName = `bracket_${new Date().getTime()}.png`;
-                        const file = new File([blob], fileName, { type: 'image/png' });
-                        
-                        // 優先使用 Web Share API (手機原生分享)
-                        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-                            try {
-                                await navigator.share({
-                                    files: [file],
-                                    title: '賽程表',
-                                    text: '這是目前的賽程表'
-                                });
-                            } catch (error) {
-                                // 如果使用者取消分享，不需報錯
-                                if (error.name !== 'AbortError') {
-                                    console.error("Share failed", error);
-                                    // Fallback to download
-                                    downloadBlob(blob, fileName);
-                                }
-                            }
-                        } else {
-                            // Fallback for desktop or non-supported browsers
-                            downloadBlob(blob, fileName);
-                        }
-                    });
+                    const imgData = canvas.toDataURL("image/png");
+                    setScreenshotImage(imgData); // Show modal with image
 
                 } catch (err) {
                     console.error("Screenshot failed", err);
-                    showAlert("截圖失敗，請嘗試手動截圖");
+                    showAlert("截圖生成失敗，請嘗試手動手機截圖");
+                } finally {
                     contentRef.current.style.background = originalBg;
+                    contentRef.current.style.overflow = originalOverflow;
                 }
-            };
-
-            const downloadBlob = (blob, fileName) => {
-                const link = document.createElement('a');
-                link.download = fileName;
-                link.href = URL.createObjectURL(blob);
-                link.click();
-                URL.revokeObjectURL(link.href);
             };
 
             // --- 核心邏輯 1: 初始化第一輪 (洗牌隨機對戰) ---
@@ -203,7 +160,6 @@
                     const p2 = players[i+1]; 
 
                     if (p2) {
-                        // 成對
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'normal',
@@ -214,7 +170,6 @@
                         });
                         i += 2;
                     } else {
-                        // 落單
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'seed',
@@ -228,7 +183,7 @@
 
                 setRounds([round1Matches]);
                 setWinner(null);
-                setRr3Rankings(null);
+                setFinalResults(null);
                 setNextRoundReady(false);
                 setView('bracket');
             };
@@ -239,8 +194,16 @@
                 const currentRound = currentRounds[currentRoundIdx];
 
                 const winners = [];
+                const losers = []; // Track losers for Bronze match logic
+
                 currentRound.forEach(m => {
-                    if (m.winner) winners.push(m.winner);
+                    if (m.winner) {
+                        winners.push(m.winner);
+                        // Identify loser if it was a normal match
+                        if (m.type === 'normal') {
+                            losers.push(m.winner === m.p1 ? m.p2 : m.p1);
+                        }
+                    }
                 });
 
                 if (winners.length <= 1) return null; 
@@ -248,6 +211,33 @@
                 let nextMatches = [];
                 const nextRoundIndex = currentRounds.length;
 
+                // --- 4人特別規則：冠軍賽 + 季軍賽 ---
+                // 檢查條件：本輪是準決賽 (2場 normal 對戰)，且產生了2位贏家和2位輸家
+                if (currentRound.length === 2 && currentRound.every(m => m.type === 'normal')) {
+                    // Winners -> Final
+                    nextMatches.push({
+                        id: `r${nextRoundIndex}-final`,
+                        type: 'final', 
+                        p1: winners[0], p2: winners[1],
+                        s1: 0, s2: 0,
+                        winner: null,
+                        round: nextRoundIndex
+                    });
+                    
+                    // Losers -> Bronze
+                    nextMatches.push({
+                        id: `r${nextRoundIndex}-bronze`,
+                        type: 'bronze', 
+                        p1: losers[0], p2: losers[1],
+                        s1: 0, s2: 0,
+                        winner: null,
+                        round: nextRoundIndex
+                    });
+                    
+                    return nextMatches;
+                }
+
+                // --- 3人特別規則：3人循環賽 ---
                 if (winners.length === 3) {
                     const p1 = winners[0];
                     const p2 = winners[1];
@@ -266,6 +256,7 @@
                         ]
                     });
                 } else {
+                    // --- 一般規則 ---
                     let pairingPool = [...winners]; 
                     
                     if (nextRoundIndex === 1 && shuffleRound2) {
@@ -338,10 +329,30 @@
                 if (allFinished && !winner) {
                     const winners = currentRound.map(m => m.winner).filter(w => w);
                     
-                    if (winners.length === 1) {
+                    // Final + Bronze round check
+                    const isFinalRound = currentRound.some(m => m.type === 'final');
+                    
+                    if (isFinalRound) {
+                        // Gather results
+                        const finalMatch = currentRound.find(m => m.type === 'final');
+                        const bronzeMatch = currentRound.find(m => m.type === 'bronze');
+                        
+                        if (finalMatch && finalMatch.winner && bronzeMatch && bronzeMatch.winner) {
+                            setWinner(finalMatch.winner);
+                            setFinalResults({
+                                first: finalMatch.winner,
+                                second: finalMatch.winner === finalMatch.p1 ? finalMatch.p2 : finalMatch.p1,
+                                third: bronzeMatch.winner,
+                                fourth: bronzeMatch.winner === bronzeMatch.p1 ? bronzeMatch.p2 : bronzeMatch.p1
+                            });
+                            setNextRoundReady(false);
+                        }
+                    } else if (winners.length === 1) {
                         setWinner(winners[0]);
                         setNextRoundReady(false);
                     } else if (winners.length === 2) {
+                        // Check if previous round was semi-finals (4 people)
+                        // If so, createNextRoundMatches handles the special 4-person logic
                         const nextMatches = createNextRoundMatches(rounds);
                         if (nextMatches) {
                             setRounds(prev => [...prev, nextMatches]);
@@ -409,7 +420,7 @@
                 
                 const match = newRounds[rIndex][mIndex];
 
-                if (match.type === 'normal') {
+                if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     let newScore = isP1 ? match.s1 + delta : match.s2 + delta;
                     if (newScore < 0) newScore = 0;
                     if (newScore > 6) newScore = 6;
@@ -452,7 +463,7 @@
                 const match = newRounds[rIndex][mIndex];
                 let currentWinner = match.winner;
 
-                if (match.type === 'normal') {
+                if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     if (!currentWinner) {
                         if (match.s1 > match.s2) currentWinner = match.p1;
                         else if (match.s2 > match.s1) currentWinner = match.p2;
@@ -460,7 +471,11 @@
                 } else if (match.type === 'rr3') {
                     const ranking = getRR3Ranking(match);
                     currentWinner = ranking[0].name; // First place is winner
-                    setRr3Rankings(ranking);
+                    setFinalResults({
+                        first: ranking[0].name,
+                        second: ranking[1].name,
+                        third: ranking[2].name
+                    });
                 }
 
                 if (currentWinner) {
@@ -470,29 +485,20 @@
                 setRounds(newRounds);
 
                 // Auto Navigation Logic
+                // For Finals round (Final + Bronze), navigate between them
                 let nextUnfinishedIndex = -1;
                 const currentRoundMatches = newRounds[rIndex];
                 
-                if (match.type === 'normal') {
-                    for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
-                        const m = currentRoundMatches[i];
-                        if (m.type !== 'seed' && !m.winner) {
+                if (match.type !== 'rr3') { // Normal/Final/Bronze logic
+                    for (let i = 0; i < currentRoundMatches.length; i++) {
+                        if (i !== mIndex && !currentRoundMatches[i].winner) {
                             nextUnfinishedIndex = i;
                             break;
                         }
                     }
-                    if (nextUnfinishedIndex === -1) {
-                        for (let i = 0; i < mIndex; i++) {
-                            const m = currentRoundMatches[i];
-                            if (m.type !== 'seed' && !m.winner) {
-                                nextUnfinishedIndex = i;
-                                break;
-                            }
-                        }
-                    }
                 }
 
-                if (nextUnfinishedIndex !== -1 && match.type === 'normal') {
+                if (nextUnfinishedIndex !== -1) {
                     setActiveMatchParams({ rIndex, mIndex: nextUnfinishedIndex });
                 } else {
                     setView('bracket');
@@ -504,7 +510,7 @@
                 setView('setup');
                 setRounds([]);
                 setWinner(null);
-                setRr3Rankings(null);
+                setFinalResults(null);
                 setNextRoundReady(false);
                 setShowResetConfirm(false);
             };
@@ -566,7 +572,7 @@
                             <div className="bg-blue-50 p-3 rounded-lg mb-4 text-xs text-blue-700 space-y-1">
                                 <div className="flex gap-2"><Icons.Shuffle size={14} className="mt-0.5"/> <span><strong>第一輪</strong>：隨機洗牌後配對。</span></div>
                                 <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對 (若勾選則第2輪再洗牌)。</span></div>
-                                <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>三人循環</strong>：若該輪剩 3 人，自動轉為循環賽。</span></div>
+                                <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>4人/3人</strong>：剩4人打冠季軍賽，剩3人轉循環賽。</span></div>
                             </div>
 
                             <button onClick={generateFirstRound} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 text-lg active:scale-[0.98] transition-transform">
@@ -586,20 +592,26 @@
                                 <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
                                 <h2 className="text-3xl font-extrabold text-yellow-700">比賽結束！</h2>
                                 
-                                {rr3Rankings ? (
+                                {finalResults ? (
                                     <div className="mt-6 w-full max-w-xs space-y-3">
                                         <div className="bg-yellow-100 p-3 rounded-lg border border-yellow-200 flex items-center justify-between">
                                             <div className="flex items-center gap-2"><Icons.Medal className="text-yellow-600" size={20}/> <span className="font-bold text-yellow-800">冠軍</span></div>
-                                            <span className="font-bold text-lg">{rr3Rankings[0].name}</span>
+                                            <span className="font-bold text-lg">{finalResults.first}</span>
                                         </div>
                                         <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 flex items-center justify-between">
                                             <div className="flex items-center gap-2"><Icons.Medal className="text-gray-500" size={20}/> <span className="font-bold text-gray-600">亞軍</span></div>
-                                            <span className="font-bold text-lg">{rr3Rankings[1].name}</span>
+                                            <span className="font-bold text-lg">{finalResults.second}</span>
                                         </div>
                                         <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 flex items-center justify-between">
                                             <div className="flex items-center gap-2"><Icons.Medal className="text-orange-600" size={20}/> <span className="font-bold text-orange-800">季軍</span></div>
-                                            <span className="font-bold text-lg">{rr3Rankings[2].name}</span>
+                                            <span className="font-bold text-lg">{finalResults.third}</span>
                                         </div>
+                                        {finalResults.fourth && (
+                                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between">
+                                                <div className="flex items-center gap-2"><span className="text-gray-400 font-bold ml-1">4.</span> <span className="font-bold text-slate-600">殿軍</span></div>
+                                                <span className="font-bold text-lg text-slate-500">{finalResults.fourth}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <p className="text-xl mt-2 text-yellow-800 font-medium">總冠軍：{winner}</p>
@@ -625,7 +637,7 @@
                                     <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
                                         <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2">
                                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-                                                {round[0].type === 'rr3' ? '循環賽 (決賽)' : `第 ${rIndex + 1} 輪`}
+                                                {round[0].type === 'rr3' ? '循環賽 (決賽)' : (round[0].type === 'final' ? '決賽 & 季軍賽' : `第 ${rIndex + 1} 輪`)}
                                             </h3>
                                             <span className="text-xs text-gray-400">{round.length} 場賽事</span>
                                         </div>
@@ -633,6 +645,8 @@
                                         {round.map((match, mIndex) => {
                                             const isSeed = match.type === 'seed';
                                             const isRR3 = match.type === 'rr3';
+                                            const isFinal = match.type === 'final';
+                                            const isBronze = match.type === 'bronze';
                                             
                                             return (
                                                 <div 
@@ -644,11 +658,23 @@
                                                         ${!match.winner && !isSeed ? 'active:scale-95 active:bg-blue-50' : ''}
                                                         ${isSeed ? 'bg-yellow-50/50 border-yellow-200' : ''}
                                                         ${isRR3 ? 'border-l-4 border-l-purple-500' : ''}
+                                                        ${isFinal ? 'border-2 border-yellow-400 ring-2 ring-yellow-100' : ''}
+                                                        ${isBronze ? 'border-l-4 border-l-orange-400' : ''}
                                                     `}
                                                 >
                                                     {isRR3 && (
                                                         <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">
                                                             3人循環賽
+                                                        </div>
+                                                    )}
+                                                    {isFinal && (
+                                                        <div className="bg-yellow-50 p-2 text-center text-xs font-bold text-yellow-700 border-b border-yellow-100 flex justify-center items-center gap-1">
+                                                            <Icons.Trophy size={12}/> 冠軍賽
+                                                        </div>
+                                                    )}
+                                                    {isBronze && (
+                                                        <div className="bg-orange-50 p-2 text-center text-xs font-bold text-orange-700 border-b border-orange-100">
+                                                            季軍賽
                                                         </div>
                                                     )}
 
@@ -710,30 +736,23 @@
 
                 // Determine next action text
                 let actionText = "完成";
-                if (match.type === 'normal') {
+                if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     const currentRoundMatches = rounds[rIndex];
                     let hasNext = false;
-                    for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
-                        if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
+                    for (let i = 0; i < currentRoundMatches.length; i++) {
+                        if (i !== mIndex && !currentRoundMatches[i].winner) {
                             hasNext = true; break;
-                        }
-                    }
-                    if (!hasNext) {
-                        for (let i = 0; i < mIndex; i++) {
-                            if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
-                                hasNext = true; break;
-                            }
                         }
                     }
                     if (hasNext) actionText = "下一場";
                 }
 
-                if (match.type === 'normal') {
+                if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     return (
                         <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
                             <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
                                 <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
-                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />對戰計分</h2>
+                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />{match.type === 'final' ? '冠軍賽' : (match.type === 'bronze' ? '季軍賽' : '對戰計分')}</h2>
                                 <div className="flex justify-end min-w-[4rem]"> 
                                      {match.winner && (
                                         <button 
@@ -964,6 +983,24 @@
                                 </div>
                                 <p className="text-gray-800 font-medium mb-6">{alertInfo.message}</p>
                                 <button onClick={() => setAlertInfo({ show: false, message: '' })} className="w-full px-4 py-2 rounded-lg bg-gray-800 hover:bg-black text-white font-bold">我知道了</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {screenshotImage && (
+                        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-fade-in" onClick={() => setScreenshotImage(null)}>
+                            <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+                                <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+                                    <h3 className="font-bold text-gray-800">截圖預覽</h3>
+                                    <button onClick={() => setScreenshotImage(null)} className="text-gray-400 hover:text-gray-600"><Icons.RotateCcw size={20}/></button>
+                                </div>
+                                <div className="p-4 bg-gray-100 flex justify-center">
+                                    <img src={screenshotImage} alt="Screenshot" className="max-h-[60vh] object-contain shadow-sm border border-gray-200 rounded" />
+                                </div>
+                                <div className="p-4 text-center">
+                                    <p className="text-sm text-gray-500 mb-2">長按上方圖片可儲存至相簿</p>
+                                    <button onClick={() => setScreenshotImage(null)} className="w-full py-2 bg-gray-100 text-gray-600 rounded-lg font-medium">關閉</button>
+                                </div>
                             </div>
                         </div>
                     )}
