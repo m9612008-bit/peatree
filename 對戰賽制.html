@@ -2,37 +2,50 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>混合賽制產生器</title>
     
-    <!-- 引入 React, Tailwind 和 html2canvas (截圖用) -->
+    <!-- PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#ffffff">
+    
+    <!-- 引入 React, Tailwind 和 html2canvas -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <style>
         /* 手機優化 */
-        body { -webkit-tap-highlight-color: transparent; }
+        body { 
+            -webkit-tap-highlight-color: transparent; 
+            overscroll-behavior-y: none;
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes bounce-in { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }
         @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         .animate-bounce-in { animation: bounce-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
         .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
+        .animate-spin-slow { animation: spin 2s linear infinite; }
+        
+        /* Safe Area Padding */
         .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
+        .safe-area-pt { padding-top: env(safe-area-inset-top); }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-900 font-sans">
-    <div id="root"></div>
+<body class="bg-gray-50 text-gray-900 font-sans h-[100dvh] w-screen overflow-hidden">
+    <div id="root" class="h-full w-full"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- Icons Components (SVG Paths) ---
+        // --- Icons Components ---
         const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 {path}
@@ -59,7 +72,8 @@
             Crown: (p) => <Icon {...p} path={<><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></>} />,
             Zap: (p) => <Icon {...p} path={<><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></>} />,
             Medal: (p) => <Icon {...p} path={<><path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/></>} />,
-            Forward: (p) => <Icon {...p} path={<><polyline points="9 18 15 12 9 6"/></>} />
+            Share: (p) => <Icon {...p} path={<><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></>} />,
+            Loader: (p) => <Icon {...p} path={<><path d="M21 12a9 9 0 1 1-6.219-8.56"/></>} />
         };
 
         // --- Main App Component ---
@@ -69,17 +83,18 @@
             const [inputText, setInputText] = useState('');
             const [inputCount, setInputCount] = useState(11); 
             const [rounds, setRounds] = useState([]); 
-            const [winner, setWinner] = useState(null); // String name of Champion
-            const [finalResults, setFinalResults] = useState(null); // { first, second, third, fourth }
+            const [winner, setWinner] = useState(null); 
+            const [finalResults, setFinalResults] = useState(null); 
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             
-            // New Setting
             const [shuffleRound2, setShuffleRound2] = useState(false);
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
-            const [screenshotImage, setScreenshotImage] = useState(null); // For mobile screenshot modal
+            const [screenshotImage, setScreenshotImage] = useState(null); 
+            const [screenshotBlob, setScreenshotBlob] = useState(null); // New state for blob
+            const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
             const contentRef = useRef(null); 
 
             const handleSampleData = () => {
@@ -101,36 +116,92 @@
                 setAlertInfo({ show: true, message: msg });
             };
 
-            // --- 截圖功能 (修正版：彈窗顯示圖片供長按儲存) ---
+            // --- 截圖功能 ---
             const handleScreenshot = async () => {
                 if (!contentRef.current) return;
-                
-                const originalBg = contentRef.current.style.background;
-                contentRef.current.style.background = "#f9fafb"; 
+                if (typeof html2canvas === 'undefined') {
+                    showAlert("截圖元件尚未載入，請檢查網路連線");
+                    return;
+                }
 
-                // Hack: momentarily expand container to capture full width/height
+                setIsScreenshotLoading(true);
+
+                // 1. 準備截圖環境
+                const originalBg = contentRef.current.style.background;
                 const originalOverflow = contentRef.current.style.overflow;
-                contentRef.current.style.overflow = "visible";
+                contentRef.current.style.background = "#f9fafb"; 
+                contentRef.current.style.overflow = "visible"; // 展開
+
+                // 計算完整寬高
+                const scrollableContainer = contentRef.current.querySelector('.overflow-x-auto');
+                let totalWidth = contentRef.current.scrollWidth;
+                if (scrollableContainer) {
+                    totalWidth = Math.max(totalWidth, scrollableContainer.scrollWidth);
+                }
+                const totalHeight = contentRef.current.scrollHeight;
 
                 try {
                     const canvas = await html2canvas(contentRef.current, {
                         scale: 2, 
                         useCORS: true,
                         logging: false,
-                        scrollX: 0,
-                        scrollY: 0
+                        width: totalWidth,
+                        height: totalHeight,
+                        windowWidth: totalWidth,
+                        windowHeight: totalHeight,
+                        x: 0, y: 0, scrollX: 0, scrollY: 0
                     });
                     
-                    const imgData = canvas.toDataURL("image/png");
-                    setScreenshotImage(imgData); // Show modal with image
+                    // 2. 生成 Blob 和 URL
+                    canvas.toBlob((blob) => {
+                        const url = URL.createObjectURL(blob);
+                        setScreenshotImage(url); 
+                        setScreenshotBlob(blob); // 儲存 Blob 供按鈕使用
+                        setIsScreenshotLoading(false);
+                    }, 'image/png');
 
                 } catch (err) {
                     console.error("Screenshot failed", err);
-                    showAlert("截圖生成失敗，請嘗試手動手機截圖");
+                    showAlert("截圖生成失敗");
+                    setIsScreenshotLoading(false);
                 } finally {
                     contentRef.current.style.background = originalBg;
                     contentRef.current.style.overflow = originalOverflow;
                 }
+            };
+
+            // --- 處理儲存/分享按鈕點擊 ---
+            const handleSaveAction = async () => {
+                if (!screenshotBlob) return;
+
+                const fileName = `bracket_${new Date().getTime()}.png`;
+                const file = new File([screenshotBlob], fileName, { type: 'image/png' });
+
+                // 優先嘗試原生分享 (Web Share API Level 2)
+                if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try {
+                        await navigator.share({
+                            files: [file],
+                            title: '賽程表',
+                            text: '這是目前的賽程表'
+                        });
+                        return; 
+                    } catch (error) {
+                        if (error.name !== 'AbortError') {
+                            console.log("Share failed, fallback to download");
+                        } else {
+                            return; // User cancelled share
+                        }
+                    }
+                }
+
+                // Fallback: 直接下載
+                const link = document.createElement('a');
+                link.download = fileName;
+                link.href = screenshotImage;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
             };
 
             // --- 核心邏輯 1: 初始化第一輪 (洗牌隨機對戰) ---
@@ -485,20 +556,29 @@
                 setRounds(newRounds);
 
                 // Auto Navigation Logic
-                // For Finals round (Final + Bronze), navigate between them
                 let nextUnfinishedIndex = -1;
                 const currentRoundMatches = newRounds[rIndex];
                 
-                if (match.type !== 'rr3') { // Normal/Final/Bronze logic
-                    for (let i = 0; i < currentRoundMatches.length; i++) {
-                        if (i !== mIndex && !currentRoundMatches[i].winner) {
+                if (match.type === 'normal') {
+                    for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
+                        const m = currentRoundMatches[i];
+                        if (m.type !== 'seed' && !m.winner) {
                             nextUnfinishedIndex = i;
                             break;
                         }
                     }
+                    if (nextUnfinishedIndex === -1) {
+                        for (let i = 0; i < mIndex; i++) {
+                            const m = currentRoundMatches[i];
+                            if (m.type !== 'seed' && !m.winner) {
+                                nextUnfinishedIndex = i;
+                                break;
+                            }
+                        }
+                    }
                 }
 
-                if (nextUnfinishedIndex !== -1) {
+                if (nextUnfinishedIndex !== -1 && match.type === 'normal') {
                     setActiveMatchParams({ rIndex, mIndex: nextUnfinishedIndex });
                 } else {
                     setView('bracket');
@@ -517,7 +597,7 @@
 
             // Renders
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-10 animate-fade-in">
+                <div className="max-w-lg mx-auto mt-10 animate-fade-in safe-area-pt">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
@@ -584,9 +664,9 @@
             );
 
             const renderBracket = () => (
-                <div className="flex flex-col h-full">
-                    {/* Wrap everything in a scrollable flex container for screenshot */}
-                    <div className="flex-1 flex flex-col overflow-hidden relative" ref={contentRef}>
+                <div className="flex flex-col h-full safe-area-pt">
+                    {/* Wrap everything in a scrollable flex container for screenshot. Add data attribute for ref finding. */}
+                    <div className="flex-1 flex flex-col overflow-hidden relative" ref={contentRef} data-screenshot-target="true">
                         {winner && (
                             <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0">
                                 <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
@@ -749,7 +829,7 @@
 
                 if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     return (
-                        <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
+                        <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
                             <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
                                 <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />{match.type === 'final' ? '冠軍賽' : (match.type === 'bronze' ? '季軍賽' : '對戰計分')}</h2>
@@ -796,7 +876,7 @@
                     const currentLeader = ranking[0].name;
 
                     return (
-                        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-fade-in">
+                        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-fade-in safe-area-pt">
                             <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30 flex-shrink-0">
                                 <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.List className="text-blue-500" size={20} />循環賽積分表</h2>
@@ -890,7 +970,7 @@
                 const subMatch = parentMatch.subMatches[subMatchIndex];
 
                 return (
-                    <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in">
+                    <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
                         <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
                             <button onClick={closeSubMatchView} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
                             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />循環賽 G{subMatchIndex + 1}</h2>
@@ -997,10 +1077,26 @@
                                 <div className="p-4 bg-gray-100 flex justify-center">
                                     <img src={screenshotImage} alt="Screenshot" className="max-h-[60vh] object-contain shadow-sm border border-gray-200 rounded" />
                                 </div>
-                                <div className="p-4 text-center">
-                                    <p className="text-sm text-gray-500 mb-2">長按上方圖片可儲存至相簿</p>
-                                    <button onClick={() => setScreenshotImage(null)} className="w-full py-2 bg-gray-100 text-gray-600 rounded-lg font-medium">關閉</button>
+                                <div className="p-4 text-center space-y-3">
+                                    <p className="text-sm text-gray-500">如果按鈕無效，請長按圖片儲存</p>
+                                    <button 
+                                        onClick={handleSaveAction}
+                                        className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
+                                    >
+                                        <Icons.Download size={20}/> 儲存 / 分享圖片
+                                    </button>
+                                    <button onClick={() => setScreenshotImage(null)} className="w-full py-2 text-gray-500 hover:bg-gray-100 rounded-lg text-sm">關閉</button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {isScreenshotLoading && (
+                        <div className="fixed inset-0 bg-black/50 z-[60] flex flex-col items-center justify-center animate-fade-in">
+                            <div className="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center">
+                                <Icons.Loader className="animate-spin-slow text-blue-600 mb-3" size={32} />
+                                <p className="font-bold text-gray-700">正在產生截圖...</p>
+                                <p className="text-xs text-gray-400 mt-1">請稍候，這可能需要幾秒鐘</p>
                             </div>
                         </div>
                     )}
