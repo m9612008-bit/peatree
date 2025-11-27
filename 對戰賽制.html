@@ -577,7 +577,7 @@
             };
 
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-10 animate-fade-in safe-area-pt pb-20">
+                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 h-full overflow-y-auto px-4">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
@@ -690,92 +690,99 @@
                             </div>
                         )}
 
-                        <div className="flex-1 overflow-x-auto pb-12 no-scrollbar">
+                        <div className="flex-1 overflow-auto pb-12 no-scrollbar touch-pan-x touch-pan-y">
                             <div className="inline-flex min-w-full p-4 gap-4 justify-center">
-                                {rounds.map((round, rIndex) => (
-                                    <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
-                                        <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2">
-                                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-                                                {round[0].type === 'rr3' ? '循環賽 (決賽)' : (round[0].type === 'final' ? '決賽 & 季軍賽' : `第 ${rIndex + 1} 輪`)}
-                                            </h3>
-                                            <span className="text-xs text-gray-400">{round.length} 場賽事</span>
-                                        </div>
-                                        
-                                        {round.map((match, mIndex) => {
-                                            const isSeed = match.type === 'seed';
-                                            const isRR3 = match.type === 'rr3';
-                                            const isFinal = match.type === 'final';
-                                            const isBronze = match.type === 'bronze';
-                                            
-                                            return (
-                                                <div 
-                                                    key={match.id} 
-                                                    onClick={() => openMatchView(rIndex, mIndex)}
-                                                    className={`
-                                                        relative flex flex-col justify-center bg-white border rounded-xl shadow-sm overflow-hidden transition-all duration-200 select-none
-                                                        ${match.winner && !isSeed ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}
-                                                        ${!match.winner && !isSeed ? 'active:scale-95 active:bg-blue-50' : ''}
-                                                        ${isSeed ? 'bg-yellow-50/50 border-yellow-200' : ''}
-                                                        ${isRR3 ? 'border-l-4 border-l-purple-500' : ''}
-                                                        ${isFinal ? 'border-2 border-yellow-400 ring-2 ring-yellow-100' : ''}
-                                                        ${isBronze ? 'border-l-4 border-l-orange-400' : ''}
-                                                    `}
-                                                >
-                                                    {isRR3 && (
-                                                        <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">
-                                                            3人循環賽
-                                                        </div>
-                                                    )}
-                                                    {isFinal && (
-                                                        <div className="bg-yellow-50 p-2 text-center text-xs font-bold text-yellow-700 border-b border-yellow-100 flex justify-center items-center gap-1">
-                                                            <Icons.Trophy size={12}/> 冠軍賽
-                                                        </div>
-                                                    )}
-                                                    {isBronze && (
-                                                        <div className="bg-orange-50 p-2 text-center text-xs font-bold text-orange-700 border-b border-orange-100">
-                                                            季軍賽
-                                                        </div>
-                                                    )}
+                                {rounds.map((round, rIndex) => {
+                                    const totalMatches = round.length;
+                                    const completedMatches = round.filter(m => m.winner).length;
 
-                                                    {isSeed ? (
-                                                        <div className="p-4 flex items-center justify-between">
-                                                            <div className="flex items-center gap-2 overflow-hidden">
-                                                                <Icons.Crown size={16} className="text-yellow-500 shrink-0" />
-                                                                <span className="font-bold text-gray-800 truncate">{match.p1}</span>
+                                    return (
+                                        <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
+                                            <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2 flex flex-col gap-1 items-center bg-opacity-90 backdrop-blur-sm rounded-b-lg">
+                                                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+                                                    {round[0].type === 'rr3' ? '循環賽 (決賽)' : (round[0].type === 'final' ? '決賽 & 季軍賽' : `第 ${rIndex + 1} 輪`)}
+                                                </h3>
+                                                <span className="text-xs text-gray-500 font-mono bg-gray-200 px-2 py-0.5 rounded-full">
+                                                   完成 {completedMatches} / {totalMatches} 組
+                                                </span>
+                                            </div>
+                                            
+                                            {round.map((match, mIndex) => {
+                                                const isSeed = match.type === 'seed';
+                                                const isRR3 = match.type === 'rr3';
+                                                const isFinal = match.type === 'final';
+                                                const isBronze = match.type === 'bronze';
+                                                
+                                                return (
+                                                    <div 
+                                                        key={match.id} 
+                                                        onClick={() => openMatchView(rIndex, mIndex)}
+                                                        className={`
+                                                            relative flex flex-col justify-center bg-white border rounded-xl shadow-sm overflow-hidden transition-all duration-200 select-none
+                                                            ${match.winner && !isSeed ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}
+                                                            ${!match.winner && !isSeed ? 'active:scale-95 active:bg-blue-50' : ''}
+                                                            ${isSeed ? 'bg-yellow-50/50 border-yellow-200' : ''}
+                                                            ${isRR3 ? 'border-l-4 border-l-purple-500' : ''}
+                                                            ${isFinal ? 'border-2 border-yellow-400 ring-2 ring-yellow-100' : ''}
+                                                            ${isBronze ? 'border-l-4 border-l-orange-400' : ''}
+                                                        `}
+                                                    >
+                                                        {isRR3 && (
+                                                            <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">
+                                                                3人循環賽
                                                             </div>
-                                                            <span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full whitespace-nowrap">輪空晉級</span>
-                                                        </div>
-                                                    ) : isRR3 ? (
-                                                        <div className="p-0">
-                                                            {[match.p1, match.p2, match.p3].map((p, idx) => (
-                                                                <div key={idx} className={`px-4 py-2 flex justify-between items-center border-b border-gray-100 last:border-0 ${match.winner === p && p ? 'bg-blue-50' : ''}`}>
-                                                                    <span className={`text-sm font-medium truncate ${!p ? 'text-gray-300' : 'text-gray-800'}`}>{p}</span>
-                                                                    {match.winner === p && <Icons.CheckCircle size={14} className="text-blue-500"/>}
+                                                        )}
+                                                        {isFinal && (
+                                                            <div className="bg-yellow-50 p-2 text-center text-xs font-bold text-yellow-700 border-b border-yellow-100 flex justify-center items-center gap-1">
+                                                                <Icons.Trophy size={12}/> 冠軍賽
+                                                            </div>
+                                                        )}
+                                                        {isBronze && (
+                                                            <div className="bg-orange-50 p-2 text-center text-xs font-bold text-orange-700 border-b border-orange-100">
+                                                                季軍賽
+                                                            </div>
+                                                        )}
+
+                                                        {isSeed ? (
+                                                            <div className="p-4 flex items-center justify-between">
+                                                                <div className="flex items-center gap-2 overflow-hidden">
+                                                                    <Icons.Crown size={16} className="text-yellow-500 shrink-0" />
+                                                                    <span className="font-bold text-gray-800 truncate">{match.p1}</span>
                                                                 </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <div className={`px-4 py-3 flex justify-between items-center border-b border-gray-100 ${match.winner === match.p1 ? 'bg-blue-50' : ''}`}>
-                                                                <span className={`text-sm font-medium truncate ${!match.p1 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p1}</span>
-                                                                {match.p1 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s1}</span>}
+                                                                <span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full whitespace-nowrap">輪空晉級</span>
                                                             </div>
-                                                            <div className={`px-4 py-3 flex justify-between items-center ${match.winner === match.p2 ? 'bg-blue-50' : ''}`}>
-                                                                <span className={`text-sm font-medium truncate ${!match.p2 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p2}</span>
-                                                                {match.p2 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s2}</span>}
+                                                        ) : isRR3 ? (
+                                                            <div className="p-0">
+                                                                {[match.p1, match.p2, match.p3].map((p, idx) => (
+                                                                    <div key={idx} className={`px-4 py-2 flex justify-between items-center border-b border-gray-100 last:border-0 ${match.winner === p && p ? 'bg-blue-50' : ''}`}>
+                                                                        <span className={`text-sm font-medium truncate ${!p ? 'text-gray-300' : 'text-gray-800'}`}>{p}</span>
+                                                                        {match.winner === p && <Icons.CheckCircle size={14} className="text-blue-500"/>}
+                                                                    </div>
+                                                                ))}
                                                             </div>
-                                                        </>
-                                                    )}
-                                                    
-                                                    {!match.winner && !isSeed && (
-                                                        <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity flex items-center justify-center pointer-events-none">
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ))}
+                                                        ) : (
+                                                            <>
+                                                                <div className={`px-4 py-3 flex justify-between items-center border-b border-gray-100 ${match.winner === match.p1 ? 'bg-blue-50' : ''}`}>
+                                                                    <span className={`text-sm font-medium truncate ${!match.p1 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p1}</span>
+                                                                    {match.p1 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s1}</span>}
+                                                                </div>
+                                                                <div className={`px-4 py-3 flex justify-between items-center ${match.winner === match.p2 ? 'bg-blue-50' : ''}`}>
+                                                                    <span className={`text-sm font-medium truncate ${!match.p2 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p2}</span>
+                                                                    {match.p2 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s2}</span>}
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                        
+                                                        {!match.winner && !isSeed && (
+                                                            <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity flex items-center justify-center pointer-events-none">
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
@@ -784,6 +791,9 @@
                         <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform mr-2">
                             <Icons.Download size={16}/> 列印 PDF
                         </button>
+                         <button onClick={handleScreenshot} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform" title="截圖">
+                             <Icons.Camera size={16} /> 截圖
+                         </button>
                     </div>
                 </div>
             );
@@ -805,6 +815,11 @@
                     }
                     if (hasNext) actionText = "下一場";
                 }
+                
+                // Calculate Progress for display
+                const currentRoundMatches = rounds[rIndex];
+                const total = currentRoundMatches.length;
+                const completed = currentRoundMatches.filter(m => m.winner).length;
 
                 if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     return (
@@ -824,7 +839,14 @@
                                      )}
                                 </div>
                             </div>
-                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
+                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
+                                {/* Progress Indicator */}
+                                <div className="absolute top-3 left-4 z-10 pointer-events-none">
+                                    <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
+                                        第 {rIndex + 1} 輪：完成 {completed} / {total}
+                                    </span>
+                                </div>
+
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
                                     <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -873,7 +895,7 @@
                                 </div>
                             </div>
                             
-                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6">
+                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6 pb-12">
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                     <div className="bg-blue-600 text-white p-3 font-bold text-center">即時戰績</div>
                                     <div className="p-4">
@@ -905,7 +927,7 @@
                                     </div>
                                 </div>
 
-                                <div className="space-y-4 pb-4">
+                                <div className="space-y-4">
                                     {match.subMatches.map((sub, idx) => (
                                         <div 
                                             key={sub.id} 
@@ -948,6 +970,10 @@
                 const parentMatch = rounds[rIndex][mIndex];
                 const subMatch = parentMatch.subMatches[subMatchIndex];
 
+                // Calculate sub-match progress
+                const total = 3;
+                const completed = parentMatch.subMatches.filter(s => s.winner).length;
+
                 return (
                     <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
                         <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
@@ -966,7 +992,14 @@
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
+                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
+                             {/* Progress Indicator for Sub Match */}
+                            <div className="absolute top-3 left-4 z-10 pointer-events-none">
+                                <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
+                                    循環賽：完成 {completed} / {total}
+                                </span>
+                            </div>
+
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${subMatch.winner === subMatch.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                 <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p1}</div>
                                 <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -1003,9 +1036,6 @@
                                     <h1 className="text-xl font-bold tracking-tight text-gray-800">混合賽制產生器</h1>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <button onClick={handleScreenshot} className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-500 transition-colors" title="截圖">
-                                        <Icons.Camera size={20} />
-                                    </button>
                                     {view === 'bracket' && (
                                         <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-red-500 transition-colors"><Icons.RotateCcw size={16} /> 重新設定</button>
                                     )}
