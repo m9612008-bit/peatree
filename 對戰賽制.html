@@ -21,14 +21,27 @@
         /* 手機優化 */
         body { 
             -webkit-tap-highlight-color: transparent; 
-            overscroll-behavior-y: none;
+            position: fixed; /* 強制鎖定 Body 防止整體彈性效果干擾內部滾動 */
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
         }
+        
+        /* 自定義滾動容器 */
+        .scroll-container {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch; /* iOS 慣性滾動 */
+            overscroll-behavior-y: contain;
+        }
+
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes bounce-in { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }
-        @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes slide-up { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
         .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         .animate-bounce-in { animation: bounce-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
         .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
@@ -39,7 +52,7 @@
         .safe-area-pt { padding-top: env(safe-area-inset-top); }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-900 font-sans h-[100dvh] w-screen overflow-hidden">
+<body class="bg-gray-50 text-gray-900 font-sans">
     <div id="root" class="h-full w-full"></div>
 
     <script type="text/babel">
@@ -577,7 +590,7 @@
             };
 
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 h-full overflow-y-auto px-4">
+                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 h-full px-4">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
@@ -970,10 +983,6 @@
                 const parentMatch = rounds[rIndex][mIndex];
                 const subMatch = parentMatch.subMatches[subMatchIndex];
 
-                // Calculate sub-match progress
-                const total = 3;
-                const completed = parentMatch.subMatches.filter(s => s.winner).length;
-
                 return (
                     <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
                         <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
@@ -992,14 +1001,7 @@
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
-                             {/* Progress Indicator for Sub Match */}
-                            <div className="absolute top-3 left-4 z-10 pointer-events-none">
-                                <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
-                                    循環賽：完成 {completed} / {total}
-                                </span>
-                            </div>
-
+                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${subMatch.winner === subMatch.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                 <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p1}</div>
                                 <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -1036,6 +1038,9 @@
                                     <h1 className="text-xl font-bold tracking-tight text-gray-800">混合賽制產生器</h1>
                                 </div>
                                 <div className="flex items-center gap-3">
+                                    <button onClick={handleScreenshot} className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-500 transition-colors" title="截圖">
+                                        <Icons.Camera size={20} />
+                                    </button>
                                     {view === 'bracket' && (
                                         <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-red-500 transition-colors"><Icons.RotateCcw size={16} /> 重新設定</button>
                                     )}
