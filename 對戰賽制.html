@@ -19,19 +19,17 @@
     
     <style>
         /* 手機優化 */
-        body { 
-            -webkit-tap-highlight-color: transparent; 
-            position: fixed; /* 強制鎖定 Body 防止整體彈性效果干擾內部滾動 */
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
+        html, body {
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #f9fafb;
         }
-        
-        /* 自定義滾動容器 */
-        .scroll-container {
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch; /* iOS 慣性滾動 */
-            overscroll-behavior-y: contain;
+
+        #root {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -52,13 +50,13 @@
         .safe-area-pt { padding-top: env(safe-area-inset-top); }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-900 font-sans">
-    <div id="root" class="h-full w-full"></div>
+<body>
+    <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- Icons Components (SVG Paths) ---
+        // --- Icons Components ---
         const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 {path}
@@ -142,6 +140,8 @@
                 const originalBg = contentRef.current.style.background;
                 const originalOverflow = contentRef.current.style.overflow;
                 contentRef.current.style.background = "#f9fafb"; 
+                // 為了截圖完整，暫時展開高度，截完再縮回來
+                contentRef.current.style.height = "auto";
                 contentRef.current.style.overflow = "visible"; 
 
                 const scrollableContainer = contentRef.current.querySelector('.overflow-x-auto');
@@ -176,6 +176,7 @@
                     setIsScreenshotLoading(false);
                 } finally {
                     contentRef.current.style.background = originalBg;
+                    contentRef.current.style.height = ""; // reset to auto/flex
                     contentRef.current.style.overflow = originalOverflow;
                 }
             };
@@ -590,7 +591,7 @@
             };
 
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 h-full px-4">
+                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
@@ -644,13 +645,16 @@
                             
                             <div className="bg-blue-50 p-3 rounded-lg mb-4 text-xs text-blue-700 space-y-1">
                                 <div className="flex gap-2"><Icons.Shuffle size={14} className="mt-0.5"/> <span><strong>第一輪</strong>：隨機洗牌後配對。</span></div>
-                                <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對 (若勾選則第2輪再洗牌)。</span></div>
-                                <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>4人/3人</strong>：剩4人打冠季軍賽，剩3人轉循環賽。</span></div>
+                                <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對，若人數為奇數則隨機抽輪空。</span></div>
+                                <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>特殊賽制</strong>：剩 4 人冠軍/季軍賽；剩 3 人循環賽；剩 2 人決賽。</span></div>
                             </div>
 
                             <button onClick={generateFirstRound} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 text-lg active:scale-[0.98] transition-transform">
                                 <Icons.Zap size={20} /> 開始第一輪對戰
                             </button>
+                            
+                            {/* Footer Spacer for Scrolling */}
+                            <div className="h-20"></div>
                         </div>
                     </div>
                 </div>
@@ -658,7 +662,7 @@
 
             const renderBracket = () => (
                 <div className="flex flex-col h-full safe-area-pt">
-                    <div className="flex-1 flex flex-col overflow-hidden relative" ref={contentRef} data-screenshot-target="true">
+                    <div className="flex-1 flex flex-col relative overflow-auto scroll-touch" ref={contentRef} data-screenshot-target="true">
                         {winner && (
                             <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0">
                                 <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
@@ -703,7 +707,7 @@
                             </div>
                         )}
 
-                        <div className="flex-1 overflow-auto pb-12 no-scrollbar touch-pan-x touch-pan-y">
+                        <div className="flex-1 overflow-auto pb-12 no-scrollbar scroll-touch">
                             <div className="inline-flex min-w-full p-4 gap-4 justify-center">
                                 {rounds.map((round, rIndex) => {
                                     const totalMatches = round.length;
@@ -801,12 +805,10 @@
                     </div>
                     
                     <div className="bg-white border-t p-4 flex justify-center safe-area-pb">
-                        <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform mr-2">
-                            <Icons.Download size={16}/> 列印 PDF
-                        </button>
                          <button onClick={handleScreenshot} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform" title="截圖">
                              <Icons.Camera size={16} /> 截圖
                          </button>
+                         <div className="h-10 w-full"></div>
                     </div>
                 </div>
             );
@@ -829,7 +831,7 @@
                     if (hasNext) actionText = "下一場";
                 }
                 
-                // Calculate Progress for display
+                // Calculate Progress
                 const currentRoundMatches = rounds[rIndex];
                 const total = currentRoundMatches.length;
                 const completed = currentRoundMatches.filter(m => m.winner).length;
@@ -852,7 +854,7 @@
                                      )}
                                 </div>
                             </div>
-                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
+                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative scroll-touch">
                                 {/* Progress Indicator */}
                                 <div className="absolute top-3 left-4 z-10 pointer-events-none">
                                     <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
@@ -860,27 +862,32 @@
                                     </span>
                                 </div>
 
+                                {/* Removed pt-16 and changed to justify-center to vertically center contents */}
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
                                     <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
                                     <div className="flex items-center gap-6">
                                         <button onClick={() => updateMatchScore(null, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{match.s1}</div>
+                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{match.s1}</div>
                                         <button onClick={() => updateMatchScore(null, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
                                     </div>
                                     {match.s1 >= 4 && match.winner === match.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
                                 <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
+                                {/* Removed pt-16 and changed to justify-center */}
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${match.winner === match.p2 ? 'bg-blue-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p2}</div>
                                     <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
                                     <div className="flex items-center gap-6">
                                         <button onClick={() => updateMatchScore(null, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{match.s2}</div>
+                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{match.s2}</div>
                                         <button onClick={() => updateMatchScore(null, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
                                     </div>
                                     {match.s2 >= 4 && match.winner === match.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
+                                
+                                {/* Spacing for bottom content */}
+                                <div className="h-20 w-full md:hidden"></div>
                             </div>
                         </div>
                     );
@@ -908,7 +915,7 @@
                                 </div>
                             </div>
                             
-                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6 pb-12">
+                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6 pb-12 scroll-touch">
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                     <div className="bg-blue-600 text-white p-3 font-bold text-center">即時戰績</div>
                                     <div className="p-4">
@@ -970,6 +977,7 @@
                                         </div>
                                     ))}
                                 </div>
+                                <div className="h-20 w-full"></div>
                             </div>
                         </div>
                     );
@@ -1001,28 +1009,38 @@
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto">
+                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto scroll-touch relative">
+                             {/* Progress Indicator for Sub Match */}
+                            <div className="absolute top-3 left-4 z-10 pointer-events-none">
+                                <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
+                                    循環賽：完成 {parentMatch.subMatches.filter(s => s.winner).length} / 3
+                                </span>
+                            </div>
+
+                            {/* Removed pt-16 and changed to justify-center */}
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${subMatch.winner === subMatch.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                 <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p1}</div>
                                 <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
                                 <div className="flex items-center gap-6">
                                     <button onClick={() => updateMatchScore(subMatch.id, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{subMatch.s1}</div>
+                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{subMatch.s1}</div>
                                     <button onClick={() => updateMatchScore(subMatch.id, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
                                 </div>
                                 {subMatch.s1 >= 4 && subMatch.winner === subMatch.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                             </div>
                             <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
+                            {/* Removed pt-16 and changed to justify-center */}
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${subMatch.winner === subMatch.p2 ? 'bg-blue-50' : 'bg-white'}`}>
                                 <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p2}</div>
                                 <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
                                 <div className="flex items-center gap-6">
                                     <button onClick={() => updateMatchScore(subMatch.id, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800">{subMatch.s2}</div>
+                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{subMatch.s2}</div>
                                     <button onClick={() => updateMatchScore(subMatch.id, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
                                 </div>
                                 {subMatch.s2 >= 4 && subMatch.winner === subMatch.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                             </div>
+                            <div className="h-20 w-full md:hidden"></div>
                         </div>
                     </div>
                 );
@@ -1038,9 +1056,11 @@
                                     <h1 className="text-xl font-bold tracking-tight text-gray-800">混合賽制產生器</h1>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <button onClick={handleScreenshot} className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-500 transition-colors" title="截圖">
-                                        <Icons.Camera size={20} />
-                                    </button>
+                                    {view === 'bracket' && (
+                                        <button onClick={handleScreenshot} className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-500 transition-colors" title="截圖">
+                                            <Icons.Camera size={20} />
+                                        </button>
+                                    )}
                                     {view === 'bracket' && (
                                         <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-red-500 transition-colors"><Icons.RotateCcw size={16} /> 重新設定</button>
                                     )}
@@ -1049,7 +1069,7 @@
                         </header>
                     )}
 
-                    <main className={`flex-1 w-full max-w-7xl mx-auto p-4 ${view === 'setup' ? 'overflow-y-auto' : 'overflow-hidden'}`}>
+                    <main className={`flex-1 w-full max-w-7xl mx-auto p-4 ${view === 'setup' ? 'overflow-y-auto scroll-touch' : 'overflow-auto scroll-touch'}`}>
                         {view === 'setup' && renderSetup()}
                         {view === 'bracket' && renderBracket()}
                         {view === 'match' && renderMatchView()}
