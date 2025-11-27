@@ -107,13 +107,24 @@
                 const originalBg = contentRef.current.style.background;
                 contentRef.current.style.background = "#f9fafb"; // Ensure background color
 
+                // 獲取內容的總高度與寬度，包含捲動區域
+                const scrollableChild = contentRef.current.querySelector('.overflow-x-auto');
+                const fullWidth = scrollableChild ? Math.max(scrollableChild.scrollWidth, contentRef.current.scrollWidth) : contentRef.current.scrollWidth;
+                const fullHeight = contentRef.current.scrollHeight;
+
                 try {
                     const canvas = await html2canvas(contentRef.current, {
                         scale: 2, 
                         useCORS: true,
                         logging: false,
-                        windowWidth: contentRef.current.scrollWidth,
-                        windowHeight: contentRef.current.scrollHeight
+                        width: fullWidth,
+                        height: fullHeight,
+                        windowWidth: fullWidth,
+                        windowHeight: fullHeight,
+                        scrollX: 0,
+                        scrollY: 0,
+                        x: 0,
+                        y: 0
                     });
                     
                     contentRef.current.style.background = originalBg; // Restore
@@ -568,116 +579,119 @@
 
             const renderBracket = () => (
                 <div className="flex flex-col h-full">
-                    {winner && (
-                        <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center">
-                            <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
-                            <h2 className="text-3xl font-extrabold text-yellow-700">比賽結束！</h2>
-                            
-                            {rr3Rankings ? (
-                                <div className="mt-6 w-full max-w-xs space-y-3">
-                                    <div className="bg-yellow-100 p-3 rounded-lg border border-yellow-200 flex items-center justify-between">
-                                        <div className="flex items-center gap-2"><Icons.Medal className="text-yellow-600" size={20}/> <span className="font-bold text-yellow-800">冠軍</span></div>
-                                        <span className="font-bold text-lg">{rr3Rankings[0].name}</span>
+                    {/* Wrap everything in a scrollable flex container for screenshot */}
+                    <div className="flex-1 flex flex-col overflow-hidden relative" ref={contentRef}>
+                        {winner && (
+                            <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0">
+                                <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
+                                <h2 className="text-3xl font-extrabold text-yellow-700">比賽結束！</h2>
+                                
+                                {rr3Rankings ? (
+                                    <div className="mt-6 w-full max-w-xs space-y-3">
+                                        <div className="bg-yellow-100 p-3 rounded-lg border border-yellow-200 flex items-center justify-between">
+                                            <div className="flex items-center gap-2"><Icons.Medal className="text-yellow-600" size={20}/> <span className="font-bold text-yellow-800">冠軍</span></div>
+                                            <span className="font-bold text-lg">{rr3Rankings[0].name}</span>
+                                        </div>
+                                        <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 flex items-center justify-between">
+                                            <div className="flex items-center gap-2"><Icons.Medal className="text-gray-500" size={20}/> <span className="font-bold text-gray-600">亞軍</span></div>
+                                            <span className="font-bold text-lg">{rr3Rankings[1].name}</span>
+                                        </div>
+                                        <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 flex items-center justify-between">
+                                            <div className="flex items-center gap-2"><Icons.Medal className="text-orange-600" size={20}/> <span className="font-bold text-orange-800">季軍</span></div>
+                                            <span className="font-bold text-lg">{rr3Rankings[2].name}</span>
+                                        </div>
                                     </div>
-                                    <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 flex items-center justify-between">
-                                        <div className="flex items-center gap-2"><Icons.Medal className="text-gray-500" size={20}/> <span className="font-bold text-gray-600">亞軍</span></div>
-                                        <span className="font-bold text-lg">{rr3Rankings[1].name}</span>
-                                    </div>
-                                    <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 flex items-center justify-between">
-                                        <div className="flex items-center gap-2"><Icons.Medal className="text-orange-600" size={20}/> <span className="font-bold text-orange-800">季軍</span></div>
-                                        <span className="font-bold text-lg">{rr3Rankings[2].name}</span>
-                                    </div>
-                                </div>
-                            ) : (
-                                <p className="text-xl mt-2 text-yellow-800 font-medium">總冠軍：{winner}</p>
-                            )}
-                        </div>
-                    )}
+                                ) : (
+                                    <p className="text-xl mt-2 text-yellow-800 font-medium">總冠軍：{winner}</p>
+                                )}
+                            </div>
+                        )}
 
-                    {nextRoundReady && !winner && (
-                        <div className="sticky top-20 z-20 flex justify-center mb-6 animate-bounce-in px-4">
-                            <button 
-                                onClick={handleGenerateNextRound}
-                                className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 hover:bg-black active:scale-95 transition-all font-bold border-4 border-white w-full sm:w-auto justify-center"
-                            >
-                                <Icons.Shuffle size={18} />
-                                <span>該輪結束，隨機抽輪空 (若奇數)</span>
-                            </button>
-                        </div>
-                    )}
+                        {nextRoundReady && !winner && (
+                            <div className="sticky top-20 z-20 flex justify-center mb-6 animate-bounce-in px-4 flex-shrink-0">
+                                <button 
+                                    onClick={handleGenerateNextRound}
+                                    className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 hover:bg-black active:scale-95 transition-all font-bold border-4 border-white w-full sm:w-auto justify-center"
+                                >
+                                    <Icons.Shuffle size={18} />
+                                    <span>該輪結束，隨機抽輪空 (若奇數)</span>
+                                </button>
+                            </div>
+                        )}
 
-                    <div className="flex-1 overflow-x-auto pb-12 no-scrollbar" id="bracket-container" ref={contentRef}>
-                        <div className="inline-flex min-w-full p-4 gap-4 justify-center">
-                            {rounds.map((round, rIndex) => (
-                                <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
-                                    <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2">
-                                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-                                            {round[0].type === 'rr3' ? '循環賽 (決賽)' : `第 ${rIndex + 1} 輪`}
-                                        </h3>
-                                        <span className="text-xs text-gray-400">{round.length} 場賽事</span>
-                                    </div>
-                                    
-                                    {round.map((match, mIndex) => {
-                                        const isSeed = match.type === 'seed';
-                                        const isRR3 = match.type === 'rr3';
+                        <div className="flex-1 overflow-x-auto pb-12 no-scrollbar">
+                            <div className="inline-flex min-w-full p-4 gap-4 justify-center">
+                                {rounds.map((round, rIndex) => (
+                                    <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
+                                        <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2">
+                                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
+                                                {round[0].type === 'rr3' ? '循環賽 (決賽)' : `第 ${rIndex + 1} 輪`}
+                                            </h3>
+                                            <span className="text-xs text-gray-400">{round.length} 場賽事</span>
+                                        </div>
                                         
-                                        return (
-                                            <div 
-                                                key={match.id} 
-                                                onClick={() => openMatchView(rIndex, mIndex)}
-                                                className={`
-                                                    relative flex flex-col justify-center bg-white border rounded-xl shadow-sm overflow-hidden transition-all duration-200 select-none
-                                                    ${match.winner && !isSeed ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}
-                                                    ${!match.winner && !isSeed ? 'active:scale-95 active:bg-blue-50' : ''}
-                                                    ${isSeed ? 'bg-yellow-50/50 border-yellow-200' : ''}
-                                                    ${isRR3 ? 'border-l-4 border-l-purple-500' : ''}
-                                                `}
-                                            >
-                                                {isRR3 && (
-                                                    <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">
-                                                        3人循環賽
-                                                    </div>
-                                                )}
+                                        {round.map((match, mIndex) => {
+                                            const isSeed = match.type === 'seed';
+                                            const isRR3 = match.type === 'rr3';
+                                            
+                                            return (
+                                                <div 
+                                                    key={match.id} 
+                                                    onClick={() => openMatchView(rIndex, mIndex)}
+                                                    className={`
+                                                        relative flex flex-col justify-center bg-white border rounded-xl shadow-sm overflow-hidden transition-all duration-200 select-none
+                                                        ${match.winner && !isSeed ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}
+                                                        ${!match.winner && !isSeed ? 'active:scale-95 active:bg-blue-50' : ''}
+                                                        ${isSeed ? 'bg-yellow-50/50 border-yellow-200' : ''}
+                                                        ${isRR3 ? 'border-l-4 border-l-purple-500' : ''}
+                                                    `}
+                                                >
+                                                    {isRR3 && (
+                                                        <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">
+                                                            3人循環賽
+                                                        </div>
+                                                    )}
 
-                                                {isSeed ? (
-                                                    <div className="p-4 flex items-center justify-between">
-                                                        <div className="flex items-center gap-2 overflow-hidden">
-                                                            <Icons.Crown size={16} className="text-yellow-500 shrink-0" />
-                                                            <span className="font-bold text-gray-800 truncate">{match.p1}</span>
-                                                        </div>
-                                                        <span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full whitespace-nowrap">輪空晉級</span>
-                                                    </div>
-                                                ) : isRR3 ? (
-                                                    <div className="p-0">
-                                                        {[match.p1, match.p2, match.p3].map((p, idx) => (
-                                                            <div key={idx} className={`px-4 py-2 flex justify-between items-center border-b border-gray-100 last:border-0 ${match.winner === p && p ? 'bg-blue-50' : ''}`}>
-                                                                <span className={`text-sm font-medium truncate ${!p ? 'text-gray-300' : 'text-gray-800'}`}>{p}</span>
-                                                                {match.winner === p && <Icons.CheckCircle size={14} className="text-blue-500"/>}
+                                                    {isSeed ? (
+                                                        <div className="p-4 flex items-center justify-between">
+                                                            <div className="flex items-center gap-2 overflow-hidden">
+                                                                <Icons.Crown size={16} className="text-yellow-500 shrink-0" />
+                                                                <span className="font-bold text-gray-800 truncate">{match.p1}</span>
                                                             </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <>
-                                                        <div className={`px-4 py-3 flex justify-between items-center border-b border-gray-100 ${match.winner === match.p1 ? 'bg-blue-50' : ''}`}>
-                                                            <span className={`text-sm font-medium truncate ${!match.p1 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p1}</span>
-                                                            {match.p1 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s1}</span>}
+                                                            <span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full whitespace-nowrap">輪空晉級</span>
                                                         </div>
-                                                        <div className={`px-4 py-3 flex justify-between items-center ${match.winner === match.p2 ? 'bg-blue-50' : ''}`}>
-                                                            <span className={`text-sm font-medium truncate ${!match.p2 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p2}</span>
-                                                            {match.p2 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s2}</span>}
+                                                    ) : isRR3 ? (
+                                                        <div className="p-0">
+                                                            {[match.p1, match.p2, match.p3].map((p, idx) => (
+                                                                <div key={idx} className={`px-4 py-2 flex justify-between items-center border-b border-gray-100 last:border-0 ${match.winner === p && p ? 'bg-blue-50' : ''}`}>
+                                                                    <span className={`text-sm font-medium truncate ${!p ? 'text-gray-300' : 'text-gray-800'}`}>{p}</span>
+                                                                    {match.winner === p && <Icons.CheckCircle size={14} className="text-blue-500"/>}
+                                                                </div>
+                                                            ))}
                                                         </div>
-                                                    </>
-                                                )}
-                                                
-                                                {!match.winner && !isSeed && (
-                                                    <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity flex items-center justify-center pointer-events-none">
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            ))}
+                                                    ) : (
+                                                        <>
+                                                            <div className={`px-4 py-3 flex justify-between items-center border-b border-gray-100 ${match.winner === match.p1 ? 'bg-blue-50' : ''}`}>
+                                                                <span className={`text-sm font-medium truncate ${!match.p1 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p1}</span>
+                                                                {match.p1 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s1}</span>}
+                                                            </div>
+                                                            <div className={`px-4 py-3 flex justify-between items-center ${match.winner === match.p2 ? 'bg-blue-50' : ''}`}>
+                                                                <span className={`text-sm font-medium truncate ${!match.p2 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p2}</span>
+                                                                {match.p2 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s2}</span>}
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                    
+                                                    {!match.winner && !isSeed && (
+                                                        <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity flex items-center justify-center pointer-events-none">
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                     
