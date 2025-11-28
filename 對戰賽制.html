@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>混合賽制產生器</title>
+    <title>混合賽制產生器 (雲端同步版)</title>
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,9 +16,18 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- 引入 Firebase (使用模組化版本) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        
+        // 將 Firebase 函式掛載到 window 以便 React 使用
+        window.firebaseModules = { initializeApp, getFirestore, doc, setDoc, onSnapshot, getDoc };
+    </script>
     
     <style>
-        /* 手機優化 */
+        /* 手機優化 - 保持原生滾動 */
         html, body {
             margin: 0;
             padding: 0;
@@ -55,6 +64,33 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        // ==========================================
+        // 🔴 請在此處貼上您的 Firebase Config 🔴
+        // ==========================================
+        const firebaseConfig = {
+  apiKey: "AIzaSyB1TyJI1O5mkl2n7iSWEFB9HqMyrqPM5XI",
+  authDomain: "beyblade-c57bb.firebaseapp.com",
+  projectId: "beyblade-c57bb",
+  storageBucket: "beyblade-c57bb.firebasestorage.app",
+  messagingSenderId: "618213078578",
+  appId: "1:618213078578:web:847a8e9f383ebb7a39ee2b",
+  measurementId: "G-T9XQFMQ9E1"
+};
+        // ==========================================
+
+        // 初始化 Firebase
+        let db = null;
+        if (window.firebaseModules && Object.keys(firebaseConfig).length > 0) {
+            try {
+                const { initializeApp, getFirestore } = window.firebaseModules;
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                console.log("Firebase initialized");
+            } catch (e) {
+                console.error("Firebase init error:", e);
+            }
+        }
 
         // --- Icons Components ---
         const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
@@ -98,8 +134,8 @@
             const [finalResults, setFinalResults] = useState(null); 
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
-            
             const [shuffleRound2, setShuffleRound2] = useState(false);
+            const [roomId, setRoomId] = useState(null); // For cloud sync
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
@@ -107,6 +143,83 @@
             const [screenshotBlob, setScreenshotBlob] = useState(null); 
             const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
             const contentRef = useRef(null); 
+
+            // --- 雲端同步邏輯 ---
+            useEffect(() => {
+                // 1. 從 URL 讀取房間 ID
+                const params = new URLSearchParams(window.location.search);
+                let currentRoomId = params.get('room');
+                if (!currentRoomId) {
+                    currentRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+                }
+                setRoomId(currentRoomId);
+            }, []);
+
+            // 2. 讀取 LocalStorage (離線備援)
+            useEffect(() => {
+                const savedData = localStorage.getItem('tournament_data');
+                if (savedData) {
+                    try {
+                        const parsed = JSON.parse(savedData);
+                        // 簡單判斷：如果有資料且頁面還在 setup，就恢復
+                        if (parsed.rounds && parsed.rounds.length > 0 && view === 'setup') {
+                            setRounds(parsed.rounds);
+                            setWinner(parsed.winner);
+                            setFinalResults(parsed.finalResults);
+                            setNextRoundReady(parsed.nextRoundReady);
+                            setView('bracket');
+                        }
+                    } catch (e) { console.error(e); }
+                }
+            }, []);
+
+            // 3. 寫入資料 (Local + Cloud)
+            useEffect(() => {
+                if (rounds.length === 0 && view === 'setup') return; 
+                
+                const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
+                localStorage.setItem('tournament_data', JSON.stringify(data));
+
+                if (db && roomId) {
+                    const { doc, setDoc } = window.firebaseModules;
+                    setDoc(doc(db, "tournaments", roomId), data)
+                        .catch(err => console.error("Cloud save error", err));
+                }
+            }, [rounds, winner, finalResults, nextRoundReady, view, roomId]);
+
+            // 4. 監聽雲端變化 (Real-time Sync)
+            useEffect(() => {
+                if (!db || !roomId) return;
+                const { doc, onSnapshot } = window.firebaseModules;
+
+                const unsubscribe = onSnapshot(doc(db, "tournaments", roomId), (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        // 簡單同步：直接覆蓋 (實務上可加時間戳判斷)
+                        setRounds(data.rounds || []);
+                        setWinner(data.winner || null);
+                        setFinalResults(data.finalResults || null);
+                        setNextRoundReady(data.nextRoundReady || false);
+                        if (data.rounds && data.rounds.length > 0 && view === 'setup') {
+                            setView('bracket');
+                        }
+                    }
+                });
+                return () => unsubscribe();
+            }, [db, roomId]);
+
+            // --- 分享功能 ---
+            const handleShare = () => {
+                const url = new URL(window.location.href);
+                url.searchParams.set('room', roomId);
+                const fullUrl = url.toString();
+
+                if (navigator.share) {
+                    navigator.share({ title: '賽程表', url: fullUrl }).catch(console.error);
+                } else {
+                    navigator.clipboard.writeText(fullUrl).then(() => showAlert("連結已複製！"));
+                }
+            };
 
             const handleSampleData = () => {
                 const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`);
@@ -140,7 +253,6 @@
                 const originalBg = contentRef.current.style.background;
                 const originalOverflow = contentRef.current.style.overflow;
                 contentRef.current.style.background = "#f9fafb"; 
-                // 為了截圖完整，暫時展開高度，截完再縮回來
                 contentRef.current.style.height = "auto";
                 contentRef.current.style.overflow = "visible"; 
 
@@ -176,32 +288,21 @@
                     setIsScreenshotLoading(false);
                 } finally {
                     contentRef.current.style.background = originalBg;
-                    contentRef.current.style.height = ""; // reset to auto/flex
+                    contentRef.current.style.height = ""; 
                     contentRef.current.style.overflow = originalOverflow;
                 }
             };
 
             const handleSaveAction = async () => {
                 if (!screenshotBlob) return;
-
                 const fileName = `bracket_${new Date().getTime()}.png`;
                 const file = new File([screenshotBlob], fileName, { type: 'image/png' });
 
                 if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
                     try {
-                        await navigator.share({
-                            files: [file],
-                            title: '賽程表',
-                            text: '這是目前的賽程表'
-                        });
+                        await navigator.share({ files: [file] });
                         return; 
-                    } catch (error) {
-                        if (error.name !== 'AbortError') {
-                            console.log("Share failed, fallback to download");
-                        } else {
-                            return; 
-                        }
-                    }
+                    } catch (error) {}
                 }
 
                 const link = document.createElement('a');
@@ -239,7 +340,6 @@
                     const p2 = players[i+1]; 
 
                     if (p2) {
-                        // 成對
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'normal',
@@ -250,7 +350,6 @@
                         });
                         i += 2;
                     } else {
-                        // 落單
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'seed',
@@ -266,6 +365,14 @@
                 setWinner(null);
                 setFinalResults(null);
                 setNextRoundReady(false);
+                
+                // Update URL
+                if (db && roomId) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('room', roomId);
+                    window.history.replaceState({}, '', url);
+                }
+
                 setView('bracket');
             };
 
@@ -588,10 +695,13 @@
                 setFinalResults(null);
                 setNextRoundReady(false);
                 setShowResetConfirm(false);
+                setRoomId(Math.random().toString(36).substring(2, 8).toUpperCase()); // Reset room
+                localStorage.removeItem('tournament_data');
+                window.history.replaceState({}, '', window.location.pathname); // Clear URL param
             };
 
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4">
+                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 h-full px-4">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
@@ -653,7 +763,6 @@
                                 <Icons.Zap size={20} /> 開始第一輪對戰
                             </button>
                             
-                            {/* Footer Spacer for Scrolling */}
                             <div className="h-20"></div>
                         </div>
                     </div>
@@ -662,7 +771,7 @@
 
             const renderBracket = () => (
                 <div className="flex flex-col h-full safe-area-pt">
-                    <div className="flex-1 flex flex-col relative overflow-auto scroll-touch" ref={contentRef} data-screenshot-target="true">
+                    <div className="flex-1 flex flex-col relative overflow-auto no-scrollbar" ref={contentRef} data-screenshot-target="true">
                         {winner && (
                             <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0">
                                 <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
@@ -707,7 +816,7 @@
                             </div>
                         )}
 
-                        <div className="flex-1 overflow-auto pb-12 no-scrollbar scroll-touch">
+                        <div className="flex-1 overflow-auto pb-12 no-scrollbar">
                             <div className="inline-flex min-w-full p-4 gap-4 justify-center">
                                 {rounds.map((round, rIndex) => {
                                     const totalMatches = round.length;
@@ -808,6 +917,9 @@
                          <button onClick={handleScreenshot} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform" title="截圖">
                              <Icons.Camera size={16} /> 截圖
                          </button>
+                         <button onClick={handleShare} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform ml-2" title="分享/連線">
+                             <Icons.Share size={16} /> 分享連線
+                         </button>
                          <div className="h-10 w-full"></div>
                     </div>
                 </div>
@@ -854,7 +966,7 @@
                                      )}
                                 </div>
                             </div>
-                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative scroll-touch">
+                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
                                 {/* Progress Indicator */}
                                 <div className="absolute top-3 left-4 z-10 pointer-events-none">
                                     <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
@@ -862,7 +974,6 @@
                                     </span>
                                 </div>
 
-                                {/* Removed pt-16 and changed to justify-center to vertically center contents */}
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
                                     <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -874,7 +985,6 @@
                                     {match.s1 >= 4 && match.winner === match.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
                                 <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
-                                {/* Removed pt-16 and changed to justify-center */}
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${match.winner === match.p2 ? 'bg-blue-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p2}</div>
                                     <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
@@ -990,6 +1100,10 @@
                 const { rIndex, mIndex, subMatchIndex } = activeMatchParams;
                 const parentMatch = rounds[rIndex][mIndex];
                 const subMatch = parentMatch.subMatches[subMatchIndex];
+                
+                // Calculate sub-match progress
+                const total = 3;
+                const completed = parentMatch.subMatches.filter(s => s.winner).length;
 
                 return (
                     <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
@@ -1009,15 +1123,14 @@
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto scroll-touch relative">
+                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
                              {/* Progress Indicator for Sub Match */}
                             <div className="absolute top-3 left-4 z-10 pointer-events-none">
                                 <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
-                                    循環賽：完成 {parentMatch.subMatches.filter(s => s.winner).length} / 3
+                                    循環賽：完成 {completed} / {total}
                                 </span>
                             </div>
 
-                            {/* Removed pt-16 and changed to justify-center */}
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${subMatch.winner === subMatch.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                 <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p1}</div>
                                 <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -1029,7 +1142,6 @@
                                 {subMatch.s1 >= 4 && subMatch.winner === subMatch.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                             </div>
                             <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
-                            {/* Removed pt-16 and changed to justify-center */}
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${subMatch.winner === subMatch.p2 ? 'bg-blue-50' : 'bg-white'}`}>
                                 <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p2}</div>
                                 <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
