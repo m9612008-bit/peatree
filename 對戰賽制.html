@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>混合賽制產生器 (連線版)</title>
+    <title>混合賽制產生器 (最終修復版)</title>
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -67,7 +67,7 @@
         const { useState, useEffect, useRef } = React;
 
         // ==========================================
-        // 🔴 Firebase Config (已根據您的圖片自動填入) 🔴
+        // 🔴 Firebase Config (已更新為 beyblade2-6a371) 🔴
         // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyAUVVtt9oAq5KweBs6eFzCmjs9mWq7q8N4",
@@ -82,11 +82,13 @@
         // 初始化 Firebase (使用全局 firebase 物件)
         let db = null;
         try {
-            if (firebase.apps.length === 0) {
+            if (typeof firebase !== 'undefined' && firebase.apps.length === 0) {
                 firebase.initializeApp(firebaseConfig);
             }
-            db = firebase.firestore();
-            console.log("🔥 Firebase initialized successfully (Compat Mode)!");
+            if (typeof firebase !== 'undefined') {
+                db = firebase.firestore();
+                console.log("🔥 Firebase initialized successfully (Compat Mode)!");
+            }
         } catch (e) {
             console.error("Firebase init error:", e);
         }
@@ -154,9 +156,9 @@
                 setRoomId(currentRoomId);
             }, []);
 
-            // Load Local
+            // Load Local (使用 v2 key 強制重置舊資料)
             useEffect(() => {
-                const savedData = localStorage.getItem('tournament_data_v1');
+                const savedData = localStorage.getItem('tournament_data_v2');
                 if (savedData) {
                     try {
                         const parsed = JSON.parse(savedData);
@@ -176,10 +178,9 @@
                 if (rounds.length === 0 && view === 'setup') return; 
                 
                 const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
-                localStorage.setItem('tournament_data_v1', JSON.stringify(data));
+                localStorage.setItem('tournament_data_v2', JSON.stringify(data));
 
                 if (db && roomId) {
-                    // 將 rounds 序列化為字串，避免 Nested Arrays 錯誤
                     const cloudData = { ...data, rounds: JSON.stringify(data.rounds) };
 
                     db.collection("tournaments").doc(roomId).set(cloudData)
@@ -217,15 +218,15 @@
                 }, (error) => {
                      console.error("Snapshot error", error);
                      let msg = "同步失敗";
-                     if (error.code === 'permission-denied') msg = "權限不足: 請至 Firebase Console -> Firestore -> Rules 將規則設為 allow read, write: if true;";
-                     setConnectionStatus({ error: true, message: msg });
+                     if (error.code === 'permission-denied') msg = "權限不足";
+                     // 靜默處理，避免打擾
                 });
                 return () => unsubscribe();
             }, [db, roomId]);
 
             const handleShare = () => {
                  if (!db) {
-                    showAlert("請先設定 Firebase Config 才能啟用雲端分享功能！");
+                    showAlert("尚未連線到 Firebase，僅能單機使用。");
                     return;
                 }
                 const url = new URL(window.location.href);
@@ -270,7 +271,6 @@
                 const originalBg = contentRef.current.style.background;
                 const originalOverflow = contentRef.current.style.overflow;
                 contentRef.current.style.background = "#f9fafb"; 
-                // 為了截圖完整，暫時展開高度，截完再縮回來
                 contentRef.current.style.height = "auto";
                 contentRef.current.style.overflow = "visible"; 
 
@@ -306,7 +306,7 @@
                     setIsScreenshotLoading(false);
                 } finally {
                     contentRef.current.style.background = originalBg;
-                    contentRef.current.style.height = ""; // reset to auto/flex
+                    contentRef.current.style.height = ""; 
                     contentRef.current.style.overflow = originalOverflow;
                 }
             };
@@ -337,191 +337,104 @@
                     if (isNaN(count) || count < 2) { showAlert("請輸入有效的人數"); return; }
                     lines = Array.from({ length: count }, (_, i) => `${i + 1}號`);
                 }
-
                 let players = shuffleArray([...lines]);
-
                 const round1Matches = [];
                 let i = 0;
                 while (i < players.length) {
-                    const p1 = players[i];
-                    const p2 = players[i+1]; 
-                    if (p2) {
-                        round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'normal', p1, p2, s1: 0, s2: 0, winner: null, round: 0 });
-                        i += 2;
-                    } else {
-                        round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'seed', p1, p2: null, winner: p1, round: 0 });
-                        i += 1;
-                    }
+                    const p1 = players[i]; const p2 = players[i+1]; 
+                    if (p2) { round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'normal', p1, p2, s1: 0, s2: 0, winner: null, round: 0 }); i += 2; } 
+                    else { round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'seed', p1, p2: null, winner: p1, round: 0 }); i += 1; }
                 }
-
-                setRounds([round1Matches]);
-                setWinner(null); setFinalResults(null); setNextRoundReady(false);
-                
+                setRounds([round1Matches]); setWinner(null); setFinalResults(null); setNextRoundReady(false);
                 if (db && roomId) {
                     const url = new URL(window.location.href);
                     url.searchParams.set('room', roomId);
                     window.history.replaceState({}, '', url);
                 }
-
                 setView('bracket');
             };
 
             const createNextRoundMatches = (currentRounds) => {
-                const currentRoundIdx = currentRounds.length - 1;
-                const currentRound = currentRounds[currentRoundIdx];
-                const winners = [];
-                const losers = [];
-                currentRound.forEach(m => {
-                    if (m.winner) {
-                        winners.push(m.winner);
-                        if (m.type === 'normal') losers.push(m.winner === m.p1 ? m.p2 : m.p1);
-                    }
-                });
-
+                const currentRoundIdx = currentRounds.length - 1; const currentRound = currentRounds[currentRoundIdx]; const winners = []; const losers = [];
+                currentRound.forEach(m => { if (m.winner) { winners.push(m.winner); if (m.type === 'normal') losers.push(m.winner === m.p1 ? m.p2 : m.p1); } });
                 if (winners.length <= 1) return null; 
-
-                let nextMatches = [];
-                const nextRoundIndex = currentRounds.length;
-
+                let nextMatches = []; const nextRoundIndex = currentRounds.length;
                 if (currentRound.length === 2 && currentRound.every(m => m.type === 'normal')) {
                     nextMatches.push({ id: `r${nextRoundIndex}-final`, type: 'final', p1: winners[0], p2: winners[1], s1: 0, s2: 0, winner: null, round: nextRoundIndex });
                     nextMatches.push({ id: `r${nextRoundIndex}-bronze`, type: 'bronze', p1: losers[0], p2: losers[1], s1: 0, s2: 0, winner: null, round: nextRoundIndex });
                     return nextMatches;
                 }
-
                 if (winners.length === 3) {
                     const [p1, p2, p3] = winners;
                     nextMatches.push({ id: `r${nextRoundIndex}-m0`, type: 'rr3', p1, p2, p3, winner: null, round: nextRoundIndex, subMatches: [{ id: 'sub1', p1, p2, s1: 0, s2: 0, winner: null }, { id: 'sub2', p2, p3, s1: 0, s2: 0, winner: null }, { id: 'sub3', p3, p1, s1: 0, s2: 0, winner: null }] });
                 } else {
-                    let pairingPool = [...winners]; 
-                    if (nextRoundIndex === 1 && shuffleRound2) pairingPool = shuffleArray(pairingPool);
+                    let pairingPool = [...winners]; if (nextRoundIndex === 1 && shuffleRound2) pairingPool = shuffleArray(pairingPool);
                     let byePlayer = null;
-                    if (pairingPool.length % 2 !== 0) {
-                        const randomIndex = Math.floor(Math.random() * pairingPool.length);
-                        byePlayer = pairingPool[randomIndex];
-                        pairingPool.splice(randomIndex, 1);
-                    }
+                    if (pairingPool.length % 2 !== 0) { const randomIndex = Math.floor(Math.random() * pairingPool.length); byePlayer = pairingPool[randomIndex]; pairingPool.splice(randomIndex, 1); }
                     let i = 0;
                     while (i < pairingPool.length) {
-                        const p1 = pairingPool[i];
-                        const p2 = pairingPool[i+1];
-                        if (p2) {
-                            nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'normal', p1, p2, s1: 0, s2: 0, winner: null, round: nextRoundIndex });
-                            i += 2;
-                        } else {
-                            nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'seed', p1, p2: null, winner: p1, round: nextRoundIndex });
-                            i += 1;
-                        }
+                        const p1 = pairingPool[i]; const p2 = pairingPool[i+1];
+                        if (p2) { nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'normal', p1, p2, s1: 0, s2: 0, winner: null, round: nextRoundIndex }); i += 2; } 
+                        else { nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'seed', p1, p2: null, winner: p1, round: nextRoundIndex }); i += 1; }
                     }
                     if (byePlayer) nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'seed', p1: byePlayer, p2: null, winner: byePlayer, round: nextRoundIndex });
                 }
                 return nextMatches;
             };
 
-            const handleGenerateNextRound = () => {
-                const nextMatches = createNextRoundMatches(rounds);
-                if (nextMatches) {
-                    setRounds([...rounds, nextMatches]);
-                    setNextRoundReady(false);
-                }
-            };
-
+            const handleGenerateNextRound = () => { const nextMatches = createNextRoundMatches(rounds); if (nextMatches) { setRounds([...rounds, nextMatches]); setNextRoundReady(false); } };
+            
+            // Winner Check Logic
             useEffect(() => {
                 if (rounds.length === 0) return;
                 const currentRound = rounds[rounds.length - 1];
                 const allFinished = currentRound.every(m => m.winner !== null);
-
                 if (allFinished && !winner) {
                     const winners = currentRound.map(m => m.winner).filter(w => w);
                     const isFinalRound = currentRound.some(m => m.type === 'final');
-                    
                     if (isFinalRound) {
-                        const finalMatch = currentRound.find(m => m.type === 'final');
-                        const bronzeMatch = currentRound.find(m => m.type === 'bronze');
+                        const finalMatch = currentRound.find(m => m.type === 'final'); const bronzeMatch = currentRound.find(m => m.type === 'bronze');
                         if (finalMatch?.winner && bronzeMatch?.winner) {
                             setWinner(finalMatch.winner);
-                            setFinalResults({
-                                first: finalMatch.winner,
-                                second: finalMatch.winner === finalMatch.p1 ? finalMatch.p2 : finalMatch.p1,
-                                third: bronzeMatch.winner,
-                                fourth: bronzeMatch.winner === bronzeMatch.p1 ? bronzeMatch.p2 : bronzeMatch.p1
-                            });
+                            setFinalResults({ first: finalMatch.winner, second: finalMatch.winner === finalMatch.p1 ? finalMatch.p2 : finalMatch.p1, third: bronzeMatch.winner, fourth: bronzeMatch.winner === bronzeMatch.p1 ? bronzeMatch.p2 : bronzeMatch.p1 });
                             setNextRoundReady(false);
                         }
-                    } else if (winners.length === 1) {
-                        setWinner(winners[0]);
-                        setNextRoundReady(false);
-                    } else if (winners.length === 2) {
-                        const nextMatches = createNextRoundMatches(rounds);
-                        if (nextMatches) {
-                            setRounds(prev => [...prev, nextMatches]);
-                            setNextRoundReady(false);
-                        }
-                    } else {
-                        setNextRoundReady(true);
-                    }
-                } else {
-                    setNextRoundReady(false);
-                }
+                    } else if (winners.length === 1) { setWinner(winners[0]); setNextRoundReady(false); }
+                    else if (winners.length === 2) { const nextMatches = createNextRoundMatches(rounds); if (nextMatches) { setRounds(prev => [...prev, nextMatches]); setNextRoundReady(false); } }
+                    else { setNextRoundReady(true); }
+                } else { setNextRoundReady(false); }
             }, [rounds, winner]);
 
-            const openMatchView = (rIndex, mIndex) => {
-                setActiveMatchParams({ rIndex, mIndex });
-                setView('match');
-            };
-            const openSubMatchView = (subMatchIndex) => {
-                setActiveMatchParams({ ...activeMatchParams, subMatchIndex });
-                setView('subMatch');
-            };
-            const closeSubMatchView = () => {
-                const newParams = { ...activeMatchParams };
-                delete newParams.subMatchIndex;
-                setActiveMatchParams(newParams);
-                setView('match');
-            };
-
+            // Match Handlers
+            const openMatchView = (rIndex, mIndex) => { const match = rounds[rIndex][mIndex]; if (match.type === 'seed') return; setActiveMatchParams({ rIndex, mIndex }); setView('match'); };
+            const openSubMatchView = (subMatchIndex) => { setActiveMatchParams({ ...activeMatchParams, subMatchIndex }); setView('subMatch'); };
+            const closeSubMatchView = () => { const newParams = { ...activeMatchParams }; delete newParams.subMatchIndex; setActiveMatchParams(newParams); setView('match'); };
+            
             const getRR3Ranking = (match) => {
-                const stats = {};
-                [match.p1, match.p2, match.p3].forEach(p => stats[p] = { name: p, wins: 0, score: 0 });
-                match.subMatches.forEach(sub => {
-                    if (sub.winner) stats[sub.winner].wins += 1;
-                    stats[sub.p1].score += sub.s1;
-                    stats[sub.p2].score += sub.s2;
-                });
-                return Object.values(stats).sort((a, b) => {
-                    if (b.wins !== a.wins) return b.wins - a.wins;
-                    return b.score - a.score;
-                });
+                const stats = {}; [match.p1, match.p2, match.p3].forEach(p => stats[p] = { name: p, wins: 0, score: 0 });
+                match.subMatches.forEach(sub => { if (sub.winner) stats[sub.winner].wins += 1; stats[sub.p1].score += sub.s1; stats[sub.p2].score += sub.s2; });
+                return Object.values(stats).sort((a, b) => { if (b.wins !== a.wins) return b.wins - a.wins; return b.score - a.score; });
             };
 
             const updateMatchScore = (targetId, isP1, delta) => {
                 if (!activeMatchParams) return;
                 const { rIndex, mIndex } = activeMatchParams;
-                const newRounds = rounds.map(r => r.map(m => {
-                    if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) };
-                    return { ...m };
-                }));
-                
+                const newRounds = rounds.map(r => r.map(m => { if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) }; return { ...m }; }));
                 const match = newRounds[rIndex][mIndex];
+                
                 if (match.type === 'rr3') {
                     const sub = match.subMatches.find(m => m.id === targetId);
                     if (sub) {
                         let newScore = isP1 ? sub.s1 + delta : sub.s2 + delta;
-                        if (newScore < 0) newScore = 0;
-                        if (newScore > 6) newScore = 6;
+                        if (newScore < 0) newScore = 0; if (newScore > 6) newScore = 6;
                         if (isP1) sub.s1 = newScore; else sub.s2 = newScore;
-                        if (sub.s1 >= 4 && sub.s1 > sub.s2) sub.winner = sub.p1;
-                        else if (sub.s2 >= 4 && sub.s2 > sub.s1) sub.winner = sub.p2;
-                        else sub.winner = null;
+                        if (sub.s1 >= 4 && sub.s1 > sub.s2) sub.winner = sub.p1; else if (sub.s2 >= 4 && sub.s2 > sub.s1) sub.winner = sub.p2; else sub.winner = null;
                     }
                 } else {
                     let newScore = isP1 ? match.s1 + delta : match.s2 + delta;
-                    if (newScore < 0) newScore = 0;
-                    if (newScore > 6) newScore = 6;
+                    if (newScore < 0) newScore = 0; if (newScore > 6) newScore = 6;
                     if (isP1) match.s1 = newScore; else match.s2 = newScore;
-                    if (match.s1 >= 4 && match.s1 > match.s2) match.winner = match.p1;
-                    else if (match.s2 >= 4 && match.s2 > match.s1) match.winner = match.p2;
-                    else match.winner = null;
+                    if (match.s1 >= 4 && match.s1 > match.s2) match.winner = match.p1; else if (match.s2 >= 4 && match.s2 > match.s1) match.winner = match.p2; else match.winner = null;
                 }
                 setRounds(newRounds);
             };
@@ -529,10 +442,7 @@
             const confirmMatchResult = () => {
                 if (!activeMatchParams) return;
                 const { rIndex, mIndex } = activeMatchParams;
-                const newRounds = rounds.map(r => r.map(m => {
-                    if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) };
-                    return { ...m };
-                }));
+                const newRounds = rounds.map(r => r.map(m => { if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) }; return { ...m }; }));
                 const match = newRounds[rIndex][mIndex];
                 let currentWinner = match.winner;
 
@@ -541,10 +451,7 @@
                     currentWinner = ranking[0].name;
                     setFinalResults({ first: ranking[0].name, second: ranking[1].name, third: ranking[2].name });
                 } else {
-                    if (!currentWinner) {
-                         if (match.s1 > match.s2) currentWinner = match.p1;
-                         else if (match.s2 > match.s1) currentWinner = match.p2;
-                    }
+                    if (!currentWinner) { if (match.s1 > match.s2) currentWinner = match.p1; else if (match.s2 > match.s1) currentWinner = match.p2; }
                 }
                 if (currentWinner) match.winner = currentWinner;
                 setRounds(newRounds);
@@ -554,25 +461,17 @@
                 const currentRoundMatches = newRounds[rIndex];
                 if (match.type !== 'rr3') {
                     for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
-                        if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
-                            nextUnfinishedIndex = i; break;
-                        }
+                        if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) { nextUnfinishedIndex = i; break; }
                     }
                     if (nextUnfinishedIndex === -1) {
                         for (let i = 0; i < mIndex; i++) {
-                            if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
-                                nextUnfinishedIndex = i; break;
-                            }
+                            if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) { nextUnfinishedIndex = i; break; }
                         }
                     }
                 }
 
-                if (nextUnfinishedIndex !== -1 && match.type !== 'rr3') {
-                    setActiveMatchParams({ rIndex, mIndex: nextUnfinishedIndex });
-                } else {
-                    setView('bracket');
-                    setActiveMatchParams(null);
-                }
+                if (nextUnfinishedIndex !== -1 && match.type !== 'rr3') { setActiveMatchParams({ rIndex, mIndex: nextUnfinishedIndex }); } 
+                else { setView('bracket'); setActiveMatchParams(null); }
             };
             
             const executeReset = () => {
@@ -582,13 +481,12 @@
                 window.history.replaceState({}, '', window.location.pathname);
             };
 
+            // --- Renders ---
             const renderSetup = () => (
                 <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4 scroll-touch h-full overflow-y-auto">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
-                            <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Icons.Users className="text-blue-500" size={24} />建立賽程</h2>
-                            </div>
+                            <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Icons.Users className="text-blue-500" size={24} />建立賽程</h2></div>
                             <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
                                 <button onClick={() => setInputMode('text')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${inputMode === 'text' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>輸入名單</button>
                                 <button onClick={() => setInputMode('number')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${inputMode === 'number' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>輸入人數</button>
@@ -613,7 +511,7 @@
                                 <input id="shuffleRound2" type="checkbox" checked={shuffleRound2} onChange={(e) => setShuffleRound2(e.target.checked)} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500" />
                                 <label htmlFor="shuffleRound2" className="ml-2 text-sm text-gray-700 font-medium select-none">第二輪重新抽籤 (增加隨機性)</label>
                             </div>
-                            <div className="bg-blue-50 p-3 rounded-lg mb-4 text-xs text-blue-700 space-y-1">
+                             <div className="bg-blue-50 p-3 rounded-lg mb-4 text-xs text-blue-700 space-y-1">
                                 <div className="flex gap-2"><Icons.Shuffle size={14} className="mt-0.5"/> <span><strong>第一輪</strong>：隨機洗牌後配對。</span></div>
                                 <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對，若人數為奇數則隨機抽輪空。</span></div>
                                 <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>特殊賽制</strong>：剩 4 人冠軍/季軍賽；剩 3 人循環賽；剩 2 人決賽。</span></div>
@@ -627,8 +525,8 @@
 
             const renderBracket = () => (
                 <div className="flex flex-col h-full safe-area-pt">
-                    <div className="flex-1 flex flex-col relative overflow-auto no-scrollbar" ref={contentRef} data-screenshot-target="true">
-                        {winner && (
+                    <div className="flex-1 flex flex-col relative overflow-auto no-scrollbar" ref={contentRef}>
+                         {winner && (
                             <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0 mx-4 mt-4">
                                 <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
                                 <h2 className="text-3xl font-extrabold text-yellow-700">比賽結束！</h2>
@@ -772,6 +670,7 @@
                                         })}
                                     </div>
                                 </div>
+
                                 <div className="space-y-4">
                                     {match.subMatches.map((sub, idx) => (
                                         <div key={sub.id} onClick={() => openSubMatchView(idx)} className={`bg-white rounded-xl shadow-sm border border-gray-200 p-4 relative overflow-hidden active:scale-95 transition-transform select-none ${sub.winner ? 'border-blue-400 ring-1 ring-blue-100' : ''}`}>
