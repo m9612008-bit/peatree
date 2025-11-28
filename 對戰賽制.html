@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>混合賽制產生器 (最終修復版)</title>
+    <title>混合賽制產生器 (最終除錯版)</title>
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,12 +17,12 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
-    <!-- 引入 Firebase Compat SDK (最穩定的連線方式) -->
+    <!-- 引入 Firebase Compat SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     
     <style>
-        /* 手機優化 - 保持原生滾動 */
+        /* 手機優化 */
         html, body {
             margin: 0;
             padding: 0;
@@ -49,11 +49,9 @@
         .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
         .animate-spin-slow { animation: spin 2s linear infinite; }
         
-        /* Safe Area Padding */
         .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
         .safe-area-pt { padding-top: env(safe-area-inset-top); }
         
-        /* 慣性滾動 */
         .scroll-touch {
             -webkit-overflow-scrolling: touch;
             overflow-y: auto;
@@ -67,7 +65,7 @@
         const { useState, useEffect, useRef } = React;
 
         // ==========================================
-        // 🔴 Firebase Config (已更新為 beyblade2-6a371) 🔴
+        // 🔴 Firebase Config 🔴
         // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyAUVVtt9oAq5KweBs6eFzCmjs9mWq7q8N4",
@@ -77,9 +75,7 @@
             messagingSenderId: "136740311404",
             appId: "1:136740311404:web:f50f31cd443a74dff92349"
         };
-        // ==========================================
 
-        // 初始化 Firebase (使用全局 firebase 物件)
         let db = null;
         try {
             if (typeof firebase !== 'undefined' && firebase.apps.length === 0) {
@@ -87,13 +83,13 @@
             }
             if (typeof firebase !== 'undefined') {
                 db = firebase.firestore();
-                console.log("🔥 Firebase initialized successfully (Compat Mode)!");
+                console.log("🔥 Firebase initialized successfully!");
             }
         } catch (e) {
             console.error("Firebase init error:", e);
         }
 
-        // --- Icons Components ---
+        // --- Icons ---
         const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 {path}
@@ -124,7 +120,6 @@
             Loader: (p) => <Icon {...p} path={<><path d="M21 12a9 9 0 1 1-6.219-8.56"/></>} />
         };
 
-        // --- Main App Component ---
         const App = () => {
             const [view, setView] = useState('setup'); 
             const [inputMode, setInputMode] = useState('text'); 
@@ -146,7 +141,6 @@
             const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
             const contentRef = useRef(null); 
 
-            // --- 雲端同步邏輯 ---
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 let currentRoomId = params.get('room');
@@ -156,7 +150,6 @@
                 setRoomId(currentRoomId);
             }, []);
 
-            // Load Local (使用 v2 key 強制重置舊資料)
             useEffect(() => {
                 const savedData = localStorage.getItem('tournament_data_v2');
                 if (savedData) {
@@ -173,16 +166,12 @@
                 }
             }, []);
 
-            // Save & Check Connection
             useEffect(() => {
                 if (rounds.length === 0 && view === 'setup') return; 
-                
                 const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
                 localStorage.setItem('tournament_data_v2', JSON.stringify(data));
-
                 if (db && roomId) {
                     const cloudData = { ...data, rounds: JSON.stringify(data.rounds) };
-
                     db.collection("tournaments").doc(roomId).set(cloudData)
                         .then(() => {
                             setConnectionStatus('success');
@@ -198,15 +187,12 @@
                 }
             }, [rounds, winner, finalResults, nextRoundReady, view, roomId]);
 
-            // Sync
             useEffect(() => {
                 if (!db || !roomId) return;
-                
                 const unsubscribe = db.collection("tournaments").doc(roomId).onSnapshot((docSnap) => {
                     if (docSnap.exists) {
                         const data = docSnap.data();
                         const cloudRounds = data.rounds ? JSON.parse(data.rounds) : [];
-                        
                         if (cloudRounds.length > 0) {
                             setRounds(cloudRounds);
                             setWinner(data.winner || null);
@@ -215,12 +201,7 @@
                             if (view === 'setup') setView('bracket');
                         }
                     }
-                }, (error) => {
-                     console.error("Snapshot error", error);
-                     let msg = "同步失敗";
-                     if (error.code === 'permission-denied') msg = "權限不足";
-                     // 靜默處理，避免打擾
-                });
+                }, (error) => console.error("Sync error:", error));
                 return () => unsubscribe();
             }, [db, roomId]);
 
@@ -258,75 +239,32 @@
                 setAlertInfo({ show: true, message: msg });
             };
 
-            // --- 截圖功能 ---
             const handleScreenshot = async () => {
-                if (!contentRef.current) return;
-                if (typeof html2canvas === 'undefined') {
-                    showAlert("截圖元件尚未載入，請檢查網路連線");
-                    return;
-                }
-
+                if (!contentRef.current || typeof html2canvas === 'undefined') { showAlert("截圖元件未就緒"); return; }
                 setIsScreenshotLoading(true);
-
                 const originalBg = contentRef.current.style.background;
                 const originalOverflow = contentRef.current.style.overflow;
                 contentRef.current.style.background = "#f9fafb"; 
                 contentRef.current.style.height = "auto";
                 contentRef.current.style.overflow = "visible"; 
-
                 const scrollableContainer = contentRef.current.querySelector('.overflow-x-auto');
                 let totalWidth = contentRef.current.scrollWidth;
-                if (scrollableContainer) {
-                    totalWidth = Math.max(totalWidth, scrollableContainer.scrollWidth);
-                }
+                if (scrollableContainer) totalWidth = Math.max(totalWidth, scrollableContainer.scrollWidth);
                 const totalHeight = contentRef.current.scrollHeight;
-
                 try {
-                    const canvas = await html2canvas(contentRef.current, {
-                        scale: 2, 
-                        useCORS: true,
-                        logging: false,
-                        width: totalWidth,
-                        height: totalHeight,
-                        windowWidth: totalWidth,
-                        windowHeight: totalHeight,
-                        x: 0, y: 0, scrollX: 0, scrollY: 0
-                    });
-                    
-                    canvas.toBlob((blob) => {
-                        const url = URL.createObjectURL(blob);
-                        setScreenshotImage(url); 
-                        setScreenshotBlob(blob); 
-                        setIsScreenshotLoading(false);
-                    }, 'image/png');
-
-                } catch (err) {
-                    console.error("Screenshot failed", err);
-                    showAlert("截圖生成失敗");
-                    setIsScreenshotLoading(false);
-                } finally {
-                    contentRef.current.style.background = originalBg;
-                    contentRef.current.style.height = ""; 
-                    contentRef.current.style.overflow = originalOverflow;
-                }
+                    const canvas = await html2canvas(contentRef.current, { scale: 2, useCORS: true, logging: false, width: totalWidth, height: totalHeight, windowWidth: totalWidth, windowHeight: totalHeight, x: 0, y: 0, scrollX: 0, scrollY: 0 });
+                    canvas.toBlob((blob) => { setScreenshotImage(URL.createObjectURL(blob)); setScreenshotBlob(blob); setIsScreenshotLoading(false); }, 'image/png');
+                } catch (err) { console.error(err); showAlert("截圖失敗"); setIsScreenshotLoading(false); } finally { contentRef.current.style.background = originalBg; contentRef.current.style.height = ""; contentRef.current.style.overflow = originalOverflow; }
             };
 
             const handleSaveAction = async () => {
                 if (!screenshotBlob) return;
                 const fileName = `bracket_${new Date().getTime()}.png`;
                 const file = new File([screenshotBlob], fileName, { type: 'image/png' });
-                if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-                    try { await navigator.share({ files: [file] }); return; } catch (error) {}
-                }
-                const link = document.createElement('a');
-                link.download = fileName;
-                link.href = screenshotImage;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                if (navigator.share) try { await navigator.share({ files: [file] }); return; } catch (error) {}
+                const link = document.createElement('a'); link.download = fileName; link.href = screenshotImage; document.body.appendChild(link); link.click(); document.body.removeChild(link);
             };
 
-            // --- 核心邏輯 ---
             const generateFirstRound = () => {
                 let lines = [];
                 if (inputMode === 'text') {
@@ -346,11 +284,7 @@
                     else { round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'seed', p1, p2: null, winner: p1, round: 0 }); i += 1; }
                 }
                 setRounds([round1Matches]); setWinner(null); setFinalResults(null); setNextRoundReady(false);
-                if (db && roomId) {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set('room', roomId);
-                    window.history.replaceState({}, '', url);
-                }
+                if (db && roomId) { const url = new URL(window.location.href); url.searchParams.set('room', roomId); window.history.replaceState({}, '', url); }
                 setView('bracket');
             };
 
@@ -366,7 +300,8 @@
                 }
                 if (winners.length === 3) {
                     const [p1, p2, p3] = winners;
-                    nextMatches.push({ id: `r${nextRoundIndex}-m0`, type: 'rr3', p1, p2, p3, winner: null, round: nextRoundIndex, subMatches: [{ id: 'sub1', p1, p2, s1: 0, s2: 0, winner: null }, { id: 'sub2', p2, p3, s1: 0, s2: 0, winner: null }, { id: 'sub3', p3, p1, s1: 0, s2: 0, winner: null }] });
+                    // 🌟 修正：這裡的 p1, p2 必須明確指定，不能用簡寫，否則會變成 undefined
+                    nextMatches.push({ id: `r${nextRoundIndex}-m0`, type: 'rr3', p1, p2, p3, winner: null, round: nextRoundIndex, subMatches: [{ id: 'sub1', p1: p1, p2: p2, s1: 0, s2: 0, winner: null }, { id: 'sub2', p1: p2, p2: p3, s1: 0, s2: 0, winner: null }, { id: 'sub3', p1: p3, p2: p1, s1: 0, s2: 0, winner: null }] });
                 } else {
                     let pairingPool = [...winners]; if (nextRoundIndex === 1 && shuffleRound2) pairingPool = shuffleArray(pairingPool);
                     let byePlayer = null;
@@ -384,7 +319,6 @@
 
             const handleGenerateNextRound = () => { const nextMatches = createNextRoundMatches(rounds); if (nextMatches) { setRounds([...rounds, nextMatches]); setNextRoundReady(false); } };
             
-            // Winner Check Logic
             useEffect(() => {
                 if (rounds.length === 0) return;
                 const currentRound = rounds[rounds.length - 1];
@@ -405,8 +339,7 @@
                 } else { setNextRoundReady(false); }
             }, [rounds, winner]);
 
-            // Match Handlers
-            const openMatchView = (rIndex, mIndex) => { const match = rounds[rIndex][mIndex]; if (match.type === 'seed') return; setActiveMatchParams({ rIndex, mIndex }); setView('match'); };
+            const openMatchView = (rIndex, mIndex) => { setActiveMatchParams({ rIndex, mIndex }); setView('match'); };
             const openSubMatchView = (subMatchIndex) => { setActiveMatchParams({ ...activeMatchParams, subMatchIndex }); setView('subMatch'); };
             const closeSubMatchView = () => { const newParams = { ...activeMatchParams }; delete newParams.subMatchIndex; setActiveMatchParams(newParams); setView('match'); };
             
@@ -421,7 +354,6 @@
                 const { rIndex, mIndex } = activeMatchParams;
                 const newRounds = rounds.map(r => r.map(m => { if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) }; return { ...m }; }));
                 const match = newRounds[rIndex][mIndex];
-                
                 if (match.type === 'rr3') {
                     const sub = match.subMatches.find(m => m.id === targetId);
                     if (sub) {
@@ -445,7 +377,6 @@
                 const newRounds = rounds.map(r => r.map(m => { if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) }; return { ...m }; }));
                 const match = newRounds[rIndex][mIndex];
                 let currentWinner = match.winner;
-
                 if (match.type === 'rr3') {
                     const ranking = getRR3Ranking(match);
                     currentWinner = ranking[0].name;
@@ -455,21 +386,12 @@
                 }
                 if (currentWinner) match.winner = currentWinner;
                 setRounds(newRounds);
-
-                // Auto Navigation
                 let nextUnfinishedIndex = -1;
                 const currentRoundMatches = newRounds[rIndex];
                 if (match.type !== 'rr3') {
-                    for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
-                        if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) { nextUnfinishedIndex = i; break; }
-                    }
-                    if (nextUnfinishedIndex === -1) {
-                        for (let i = 0; i < mIndex; i++) {
-                            if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) { nextUnfinishedIndex = i; break; }
-                        }
-                    }
+                    for (let i = mIndex + 1; i < currentRoundMatches.length; i++) { if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) { nextUnfinishedIndex = i; break; } }
+                    if (nextUnfinishedIndex === -1) { for (let i = 0; i < mIndex; i++) { if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) { nextUnfinishedIndex = i; break; } } }
                 }
-
                 if (nextUnfinishedIndex !== -1 && match.type !== 'rr3') { setActiveMatchParams({ rIndex, mIndex: nextUnfinishedIndex }); } 
                 else { setView('bracket'); setActiveMatchParams(null); }
             };
@@ -481,7 +403,6 @@
                 window.history.replaceState({}, '', window.location.pathname);
             };
 
-            // --- Renders ---
             const renderSetup = () => (
                 <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4 scroll-touch h-full overflow-y-auto">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
