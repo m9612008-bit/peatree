@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>混合賽制產生器 (連線診斷版)</title>
+    <title>混合賽制產生器 (連線最終版)</title>
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,28 +17,40 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
-    <!-- 引入 Firebase -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-        
-        window.firebaseModules = { initializeApp, getFirestore, doc, setDoc, onSnapshot, getDoc };
-    </script>
+    <!-- 🌟 關鍵修改：改用 Firebase Compat SDK (全域變數模式) 🌟 -->
+    <!-- 這保證了 firebase 物件在 React 執行前就已經存在 -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     
     <style>
         /* 手機優化 */
-        html, body { margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; background-color: #f9fafb; }
-        #root { min-height: 100vh; display: flex; flex-direction: column; }
+        html, body {
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #f9fafb;
+        }
+
+        #root {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes bounce-in { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }
         @keyframes slide-up { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
         .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         .animate-bounce-in { animation: bounce-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
         .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
         .animate-spin-slow { animation: spin 2s linear infinite; }
+        
+        /* Safe Area Padding */
         .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
         .safe-area-pt { padding-top: env(safe-area-inset-top); }
     </style>
@@ -50,7 +62,7 @@
         const { useState, useEffect, useRef } = React;
 
         // ==========================================
-        // 🔴 Firebase Config (已根據您的圖片修正) 🔴
+        // 🔴 Firebase Config (已填入) 🔴
         // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyB1TyJI105mkl2n7iSWEFB9HqMyrqPM5XI", 
@@ -63,16 +75,16 @@
         };
         // ==========================================
 
+        // 初始化 Firebase (使用全局 firebase 物件)
         let db = null;
-        if (window.firebaseModules) {
-            try {
-                const { initializeApp, getFirestore } = window.firebaseModules;
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                console.log("Firebase initialized");
-            } catch (e) {
-                console.error("Firebase init error:", e);
+        try {
+            if (firebase.apps.length === 0) {
+                firebase.initializeApp(firebaseConfig);
             }
+            db = firebase.firestore();
+            console.log("🔥 Firebase initialized successfully (Compat Mode)!");
+        } catch (e) {
+            console.error("Firebase init error:", e);
         }
 
         // --- Icons Components ---
@@ -81,6 +93,7 @@
                 {path}
             </svg>
         );
+
         const Icons = {
             Trophy: (p) => <Icon {...p} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />,
             Users: (p) => <Icon {...p} path={<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} />,
@@ -102,8 +115,6 @@
             Zap: (p) => <Icon {...p} path={<><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></>} />,
             Medal: (p) => <Icon {...p} path={<><path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/></>} />,
             Share: (p) => <Icon {...p} path={<><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></>} />,
-            Link: (p) => <Icon {...p} path={<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>} />,
-            Cloud: (p) => <Icon {...p} path={<><path d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19"/><path d="M17.5 19h3.5a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-1.5"/><path d="M6.5 19H3a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1.5"/><path d="M12 13.5V19"/><path d="M12 4a4 4 0 0 0-4 4 4 4 0 0 0 .4 1.6"/><path d="M12 4a4 4 0 0 1 4 4 4 4 0 0 1-.4 1.6"/></>} />,
             Loader: (p) => <Icon {...p} path={<><path d="M21 12a9 9 0 1 1-6.219-8.56"/></>} />
         };
 
@@ -120,7 +131,7 @@
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             const [shuffleRound2, setShuffleRound2] = useState(false);
             const [roomId, setRoomId] = useState(null); 
-            const [connectionStatus, setConnectionStatus] = useState(null); // success, error
+            const [connectionStatus, setConnectionStatus] = useState(null); 
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
@@ -164,20 +175,16 @@
                 localStorage.setItem('tournament_data', JSON.stringify(data));
 
                 if (db && roomId) {
-                    const { doc, setDoc } = window.firebaseModules;
-                    setDoc(doc(db, "tournaments", roomId), data)
+                    db.collection("tournaments").doc(roomId).set(data)
                         .then(() => {
                             setConnectionStatus('success');
-                            // 3秒後隱藏成功訊息
                             setTimeout(() => setConnectionStatus(null), 3000);
                         })
                         .catch(err => {
                             console.error("Cloud save error", err);
-                            // 分析錯誤代碼
                             let msg = "連線失敗";
                             if (err.code === 'permission-denied') msg = "權限被拒絕 (請檢查 Firestore Rules)";
                             if (err.code === 'unavailable') msg = "網路斷線";
-                            if (err.message.includes("client is offline")) msg = "用戶端離線";
                             
                             setConnectionStatus({ error: true, message: msg });
                         });
@@ -187,27 +194,27 @@
             // Sync
             useEffect(() => {
                 if (!db || !roomId) return;
-                try {
-                    const { doc, onSnapshot } = window.firebaseModules;
-                    const unsubscribe = onSnapshot(doc(db, "tournaments", roomId), (docSnap) => {
-                        if (docSnap.exists()) {
-                            const data = docSnap.data();
-                            setRounds(data.rounds || []);
-                            setWinner(data.winner || null);
-                            setFinalResults(data.finalResults || null);
-                            setNextRoundReady(data.nextRoundReady || false);
-                            if (data.rounds && data.rounds.length > 0 && view === 'setup') {
-                                setView('bracket');
-                            }
+                
+                const unsubscribe = db.collection("tournaments").doc(roomId).onSnapshot((docSnap) => {
+                    if (docSnap.exists) {
+                        const data = docSnap.data();
+                        // 避免本地剛寫入又被雲端舊資料覆蓋，簡單起見直接同步
+                        // 實際專案可比對 timestamp
+                        setRounds(data.rounds || []);
+                        setWinner(data.winner || null);
+                        setFinalResults(data.finalResults || null);
+                        setNextRoundReady(data.nextRoundReady || false);
+                        if (data.rounds && data.rounds.length > 0 && view === 'setup') {
+                            setView('bracket');
                         }
-                    }, (error) => {
-                         console.error("Snapshot error", error);
-                         let msg = "同步失敗";
-                         if (error.code === 'permission-denied') msg = "權限不足: 請至 Firebase Console -> Firestore -> Rules 將規則設為 allow read, write: if true;";
-                         setConnectionStatus({ error: true, message: msg });
-                    });
-                    return () => unsubscribe();
-                } catch(e) { console.error("Sync setup error", e); }
+                    }
+                }, (error) => {
+                     console.error("Snapshot error", error);
+                     let msg = "同步失敗";
+                     if (error.code === 'permission-denied') msg = "權限不足: 請至 Firebase Console -> Firestore -> Rules 將規則設為 allow read, write: if true;";
+                     setConnectionStatus({ error: true, message: msg });
+                });
+                return () => unsubscribe();
             }, [db, roomId]);
 
             const handleShare = () => {
@@ -962,7 +969,6 @@
                                     </span>
                                 </div>
 
-                                {/* 修正：使用 justify-center 讓內容垂直置中，移除 pt-16，底部隱形區塊已設為 md:hidden */}
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
                                     <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -1020,7 +1026,7 @@
                                 </div>
                             </div>
                             
-                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6 pb-12">
+                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6 pb-12 scroll-touch">
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                     <div className="bg-blue-600 text-white p-3 font-bold text-center">即時戰績</div>
                                     <div className="p-4">
