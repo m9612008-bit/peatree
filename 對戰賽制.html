@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>混合賽制產生器 (自動存檔版)</title>
+    <title>混合賽制產生器 (連線版)</title>
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,9 +16,13 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- 引入 Firebase Compat SDK (最穩定的連線方式) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     
     <style>
-        /* 手機優化 */
+        /* 手機優化 - 保持原生滾動 */
         html, body {
             margin: 0;
             padding: 0;
@@ -48,6 +52,12 @@
         /* Safe Area Padding */
         .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
         .safe-area-pt { padding-top: env(safe-area-inset-top); }
+        
+        /* 慣性滾動 */
+        .scroll-touch {
+            -webkit-overflow-scrolling: touch;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -55,6 +65,31 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        // ==========================================
+        // 🔴 Firebase Config (已根據您的圖片自動填入) 🔴
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyAUVVtt9oAq5KweBs6eFzCmjs9mWq7q8N4",
+            authDomain: "beyblade2-6a371.firebaseapp.com",
+            projectId: "beyblade2-6a371",
+            storageBucket: "beyblade2-6a371.firebasestorage.app",
+            messagingSenderId: "136740311404",
+            appId: "1:136740311404:web:f50f31cd443a74dff92349"
+        };
+        // ==========================================
+
+        // 初始化 Firebase (使用全局 firebase 物件)
+        let db = null;
+        try {
+            if (firebase.apps.length === 0) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            db = firebase.firestore();
+            console.log("🔥 Firebase initialized successfully (Compat Mode)!");
+        } catch (e) {
+            console.error("Firebase init error:", e);
+        }
 
         // --- Icons Components ---
         const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
@@ -99,6 +134,8 @@
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             const [shuffleRound2, setShuffleRound2] = useState(false);
+            const [roomId, setRoomId] = useState(null); 
+            const [connectionStatus, setConnectionStatus] = useState(null); 
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
@@ -107,58 +144,99 @@
             const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
             const contentRef = useRef(null); 
 
-            // --- 自動存檔 (Auto-Save) ---
-            // Load
+            // --- 雲端同步邏輯 ---
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                let currentRoomId = params.get('room');
+                if (!currentRoomId) {
+                    currentRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+                }
+                setRoomId(currentRoomId);
+            }, []);
+
+            // Load Local
             useEffect(() => {
                 const savedData = localStorage.getItem('tournament_data_v1');
                 if (savedData) {
                     try {
                         const parsed = JSON.parse(savedData);
-                        // 如果有進行中的比賽，恢復狀態
-                        if (parsed.rounds && parsed.rounds.length > 0) {
+                        if (parsed.rounds && parsed.rounds.length > 0 && view === 'setup') {
                             setRounds(parsed.rounds);
                             setWinner(parsed.winner);
                             setFinalResults(parsed.finalResults);
                             setNextRoundReady(parsed.nextRoundReady);
-                            // 如果有 view 狀態也可以恢復，但通常回到 bracket 比較好
-                            setView('bracket'); 
+                            setView('bracket');
                         }
-                        if (parsed.inputText) setInputText(parsed.inputText);
-                    } catch (e) { console.error("Load error", e); }
+                    } catch (e) {}
                 }
             }, []);
 
-            // Save
+            // Save & Check Connection
             useEffect(() => {
-                // 只有在比賽開始後才頻繁存檔
-                if (rounds.length > 0) {
-                    const data = { 
-                        rounds, 
-                        winner, 
-                        finalResults, 
-                        nextRoundReady, 
-                        inputText,
-                        timestamp: Date.now() 
-                    };
-                    localStorage.setItem('tournament_data_v1', JSON.stringify(data));
+                if (rounds.length === 0 && view === 'setup') return; 
+                
+                const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
+                localStorage.setItem('tournament_data_v1', JSON.stringify(data));
+
+                if (db && roomId) {
+                    // 將 rounds 序列化為字串，避免 Nested Arrays 錯誤
+                    const cloudData = { ...data, rounds: JSON.stringify(data.rounds) };
+
+                    db.collection("tournaments").doc(roomId).set(cloudData)
+                        .then(() => {
+                            setConnectionStatus('success');
+                            setTimeout(() => setConnectionStatus(null), 2000);
+                        })
+                        .catch(err => {
+                            console.error("Cloud save error", err);
+                            let msg = "連線失敗";
+                            if (err.code === 'permission-denied') msg = "權限被拒絕 (請檢查 Firestore Rules)";
+                            if (err.code === 'unavailable') msg = "網路斷線";
+                            setConnectionStatus({ error: true, message: msg });
+                        });
                 }
-            }, [rounds, winner, finalResults, nextRoundReady, inputText]);
+            }, [rounds, winner, finalResults, nextRoundReady, view, roomId]);
 
-            // --- 防呆警示 (BeforeUnload) ---
+            // Sync
             useEffect(() => {
-                const handleBeforeUnload = (e) => {
-                    // 只有在比賽進行中且還沒產生冠軍時才提示
-                    if (rounds.length > 0 && !winner) {
-                        e.preventDefault();
-                        e.returnValue = ''; // 現代瀏覽器標準寫法
-                        return ''; // 舊版相容
+                if (!db || !roomId) return;
+                
+                const unsubscribe = db.collection("tournaments").doc(roomId).onSnapshot((docSnap) => {
+                    if (docSnap.exists) {
+                        const data = docSnap.data();
+                        const cloudRounds = data.rounds ? JSON.parse(data.rounds) : [];
+                        
+                        if (cloudRounds.length > 0) {
+                            setRounds(cloudRounds);
+                            setWinner(data.winner || null);
+                            setFinalResults(data.finalResults || null);
+                            setNextRoundReady(data.nextRoundReady || false);
+                            if (view === 'setup') setView('bracket');
+                        }
                     }
-                };
+                }, (error) => {
+                     console.error("Snapshot error", error);
+                     let msg = "同步失敗";
+                     if (error.code === 'permission-denied') msg = "權限不足: 請至 Firebase Console -> Firestore -> Rules 將規則設為 allow read, write: if true;";
+                     setConnectionStatus({ error: true, message: msg });
+                });
+                return () => unsubscribe();
+            }, [db, roomId]);
 
-                window.addEventListener('beforeunload', handleBeforeUnload);
-                return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-            }, [rounds, winner]);
-
+            const handleShare = () => {
+                 if (!db) {
+                    showAlert("請先設定 Firebase Config 才能啟用雲端分享功能！");
+                    return;
+                }
+                const url = new URL(window.location.href);
+                url.searchParams.set('room', roomId);
+                const fullUrl = url.toString();
+                if (navigator.share) {
+                    navigator.share({ title: '賽程表', url: fullUrl }).catch(console.error);
+                } else {
+                    navigator.clipboard.writeText(fullUrl).then(() => showAlert("連結已複製！"));
+                }
+            };
 
             const handleSampleData = () => {
                 const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`);
@@ -192,6 +270,7 @@
                 const originalBg = contentRef.current.style.background;
                 const originalOverflow = contentRef.current.style.overflow;
                 contentRef.current.style.background = "#f9fafb"; 
+                // 為了截圖完整，暫時展開高度，截完再縮回來
                 contentRef.current.style.height = "auto";
                 contentRef.current.style.overflow = "visible"; 
 
@@ -227,7 +306,7 @@
                     setIsScreenshotLoading(false);
                 } finally {
                     contentRef.current.style.background = originalBg;
-                    contentRef.current.style.height = ""; 
+                    contentRef.current.style.height = ""; // reset to auto/flex
                     contentRef.current.style.overflow = originalOverflow;
                 }
             };
@@ -252,16 +331,10 @@
                 let lines = [];
                 if (inputMode === 'text') {
                     lines = inputText.split(/[\n,]+/).map(s => s.trim()).filter(s => s !== '');
-                    if (lines.length < 2) {
-                        showAlert("請至少輸入兩位參賽者");
-                        return;
-                    }
+                    if (lines.length < 2) { showAlert("請至少輸入兩位參賽者"); return; }
                 } else {
                     const count = parseInt(inputCount, 10);
-                    if (isNaN(count) || count < 2) {
-                        showAlert("請輸入有效的人數（至少 2 人）");
-                        return;
-                    }
+                    if (isNaN(count) || count < 2) { showAlert("請輸入有效的人數"); return; }
                     lines = Array.from({ length: count }, (_, i) => `${i + 1}號`);
                 }
 
@@ -272,51 +345,36 @@
                 while (i < players.length) {
                     const p1 = players[i];
                     const p2 = players[i+1]; 
-
                     if (p2) {
-                        // 成對
-                        round1Matches.push({
-                            id: `r0-m${round1Matches.length}`,
-                            type: 'normal',
-                            p1: p1, p2: p2,
-                            s1: 0, s2: 0,
-                            winner: null,
-                            round: 0
-                        });
+                        round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'normal', p1, p2, s1: 0, s2: 0, winner: null, round: 0 });
                         i += 2;
                     } else {
-                        // 落單
-                        round1Matches.push({
-                            id: `r0-m${round1Matches.length}`,
-                            type: 'seed',
-                            p1: p1, p2: null,
-                            winner: p1, 
-                            round: 0
-                        });
+                        round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'seed', p1, p2: null, winner: p1, round: 0 });
                         i += 1;
                     }
                 }
 
                 setRounds([round1Matches]);
-                setWinner(null);
-                setFinalResults(null);
-                setNextRoundReady(false);
+                setWinner(null); setFinalResults(null); setNextRoundReady(false);
+                
+                if (db && roomId) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('room', roomId);
+                    window.history.replaceState({}, '', url);
+                }
+
                 setView('bracket');
             };
 
             const createNextRoundMatches = (currentRounds) => {
                 const currentRoundIdx = currentRounds.length - 1;
                 const currentRound = currentRounds[currentRoundIdx];
-
                 const winners = [];
                 const losers = [];
-
                 currentRound.forEach(m => {
                     if (m.winner) {
                         winners.push(m.winner);
-                        if (m.type === 'normal') {
-                            losers.push(m.winner === m.p1 ? m.p2 : m.p1);
-                        }
+                        if (m.type === 'normal') losers.push(m.winner === m.p1 ? m.p2 : m.p1);
                     }
                 });
 
@@ -326,95 +384,36 @@
                 const nextRoundIndex = currentRounds.length;
 
                 if (currentRound.length === 2 && currentRound.every(m => m.type === 'normal')) {
-                    nextMatches.push({
-                        id: `r${nextRoundIndex}-final`,
-                        type: 'final', 
-                        p1: winners[0], p2: winners[1],
-                        s1: 0, s2: 0,
-                        winner: null,
-                        round: nextRoundIndex
-                    });
-                    
-                    nextMatches.push({
-                        id: `r${nextRoundIndex}-bronze`,
-                        type: 'bronze', 
-                        p1: losers[0], p2: losers[1],
-                        s1: 0, s2: 0,
-                        winner: null,
-                        round: nextRoundIndex
-                    });
-                    
+                    nextMatches.push({ id: `r${nextRoundIndex}-final`, type: 'final', p1: winners[0], p2: winners[1], s1: 0, s2: 0, winner: null, round: nextRoundIndex });
+                    nextMatches.push({ id: `r${nextRoundIndex}-bronze`, type: 'bronze', p1: losers[0], p2: losers[1], s1: 0, s2: 0, winner: null, round: nextRoundIndex });
                     return nextMatches;
                 }
 
                 if (winners.length === 3) {
-                    const p1 = winners[0];
-                    const p2 = winners[1];
-                    const p3 = winners[2];
-
-                    nextMatches.push({
-                        id: `r${nextRoundIndex}-m0`,
-                        type: 'rr3', 
-                        p1: p1, p2: p2, p3: p3,
-                        winner: null,
-                        round: nextRoundIndex,
-                        subMatches: [
-                            { id: 'sub1', p1: p1, p2: p2, s1: 0, s2: 0, winner: null },
-                            { id: 'sub2', p1: p2, p2: p3, s1: 0, s2: 0, winner: null },
-                            { id: 'sub3', p1: p3, p2: p1, s1: 0, s2: 0, winner: null },
-                        ]
-                    });
+                    const [p1, p2, p3] = winners;
+                    nextMatches.push({ id: `r${nextRoundIndex}-m0`, type: 'rr3', p1, p2, p3, winner: null, round: nextRoundIndex, subMatches: [{ id: 'sub1', p1, p2, s1: 0, s2: 0, winner: null }, { id: 'sub2', p2, p3, s1: 0, s2: 0, winner: null }, { id: 'sub3', p3, p1, s1: 0, s2: 0, winner: null }] });
                 } else {
                     let pairingPool = [...winners]; 
-                    
-                    if (nextRoundIndex === 1 && shuffleRound2) {
-                        pairingPool = shuffleArray(pairingPool);
-                    }
-
+                    if (nextRoundIndex === 1 && shuffleRound2) pairingPool = shuffleArray(pairingPool);
                     let byePlayer = null;
-
                     if (pairingPool.length % 2 !== 0) {
                         const randomIndex = Math.floor(Math.random() * pairingPool.length);
                         byePlayer = pairingPool[randomIndex];
                         pairingPool.splice(randomIndex, 1);
                     }
-
                     let i = 0;
                     while (i < pairingPool.length) {
                         const p1 = pairingPool[i];
                         const p2 = pairingPool[i+1];
-
                         if (p2) {
-                            nextMatches.push({
-                                id: `r${nextRoundIndex}-m${nextMatches.length}`,
-                                type: 'normal',
-                                p1: p1, p2: p2,
-                                s1: 0, s2: 0,
-                                winner: null,
-                                round: nextRoundIndex
-                            });
+                            nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'normal', p1, p2, s1: 0, s2: 0, winner: null, round: nextRoundIndex });
                             i += 2;
                         } else {
-                            nextMatches.push({
-                                id: `r${nextRoundIndex}-m${nextMatches.length}`,
-                                type: 'seed',
-                                p1: p1, p2: null,
-                                winner: p1,
-                                round: nextRoundIndex
-                            });
+                            nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'seed', p1, p2: null, winner: p1, round: nextRoundIndex });
                             i += 1;
                         }
                     }
-
-                    if (byePlayer) {
-                        nextMatches.push({
-                            id: `r${nextRoundIndex}-m${nextMatches.length}`,
-                            type: 'seed',
-                            p1: byePlayer, p2: null,
-                            winner: byePlayer,
-                            round: nextRoundIndex
-                        });
-                    }
+                    if (byePlayer) nextMatches.push({ id: `r${nextRoundIndex}-m${nextMatches.length}`, type: 'seed', p1: byePlayer, p2: null, winner: byePlayer, round: nextRoundIndex });
                 }
                 return nextMatches;
             };
@@ -429,20 +428,17 @@
 
             useEffect(() => {
                 if (rounds.length === 0) return;
-                
                 const currentRound = rounds[rounds.length - 1];
                 const allFinished = currentRound.every(m => m.winner !== null);
 
                 if (allFinished && !winner) {
                     const winners = currentRound.map(m => m.winner).filter(w => w);
-                    
                     const isFinalRound = currentRound.some(m => m.type === 'final');
                     
                     if (isFinalRound) {
                         const finalMatch = currentRound.find(m => m.type === 'final');
                         const bronzeMatch = currentRound.find(m => m.type === 'bronze');
-                        
-                        if (finalMatch && finalMatch.winner && bronzeMatch && bronzeMatch.winner) {
+                        if (finalMatch?.winner && bronzeMatch?.winner) {
                             setWinner(finalMatch.winner);
                             setFinalResults({
                                 first: finalMatch.winner,
@@ -470,20 +466,14 @@
             }, [rounds, winner]);
 
             const openMatchView = (rIndex, mIndex) => {
-                const match = rounds[rIndex][mIndex];
-                if (match.type === 'seed') return; 
                 setActiveMatchParams({ rIndex, mIndex });
                 setView('match');
             };
-
             const openSubMatchView = (subMatchIndex) => {
-                if (!activeMatchParams) return;
                 setActiveMatchParams({ ...activeMatchParams, subMatchIndex });
                 setView('subMatch');
             };
-
             const closeSubMatchView = () => {
-                if (!activeMatchParams) return;
                 const newParams = { ...activeMatchParams };
                 delete newParams.subMatchIndex;
                 setActiveMatchParams(newParams);
@@ -492,25 +482,16 @@
 
             const getRR3Ranking = (match) => {
                 const stats = {};
-                [match.p1, match.p2, match.p3].forEach(p => {
-                    stats[p] = { name: p, wins: 0, score: 0 };
-                });
-
+                [match.p1, match.p2, match.p3].forEach(p => stats[p] = { name: p, wins: 0, score: 0 });
                 match.subMatches.forEach(sub => {
                     if (sub.winner) stats[sub.winner].wins += 1;
                     stats[sub.p1].score += sub.s1;
                     stats[sub.p2].score += sub.s2;
                 });
-
                 return Object.values(stats).sort((a, b) => {
                     if (b.wins !== a.wins) return b.wins - a.wins;
                     return b.score - a.score;
                 });
-            };
-
-            const calculateRR3Winner = (match) => {
-                const ranking = getRR3Ranking(match);
-                return ranking[0].name;
             };
 
             const updateMatchScore = (targetId, isP1, delta) => {
@@ -522,42 +503,32 @@
                 }));
                 
                 const match = newRounds[rIndex][mIndex];
-
-                if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
-                    let newScore = isP1 ? match.s1 + delta : match.s2 + delta;
-                    if (newScore < 0) newScore = 0;
-                    if (newScore > 6) newScore = 6;
-                    
-                    if (isP1) match.s1 = newScore;
-                    else match.s2 = newScore;
-
-                    if (match.s1 >= 4 && match.s1 > match.s2) match.winner = match.p1;
-                    else if (match.s2 >= 4 && match.s2 > match.s1) match.winner = match.p2;
-                    else match.winner = null;
-                } 
-                else if (match.type === 'rr3') {
+                if (match.type === 'rr3') {
                     const sub = match.subMatches.find(m => m.id === targetId);
                     if (sub) {
                         let newScore = isP1 ? sub.s1 + delta : sub.s2 + delta;
                         if (newScore < 0) newScore = 0;
                         if (newScore > 6) newScore = 6;
-                        
-                        if (isP1) sub.s1 = newScore;
-                        else sub.s2 = newScore;
-
+                        if (isP1) sub.s1 = newScore; else sub.s2 = newScore;
                         if (sub.s1 >= 4 && sub.s1 > sub.s2) sub.winner = sub.p1;
                         else if (sub.s2 >= 4 && sub.s2 > sub.s1) sub.winner = sub.p2;
                         else sub.winner = null;
                     }
+                } else {
+                    let newScore = isP1 ? match.s1 + delta : match.s2 + delta;
+                    if (newScore < 0) newScore = 0;
+                    if (newScore > 6) newScore = 6;
+                    if (isP1) match.s1 = newScore; else match.s2 = newScore;
+                    if (match.s1 >= 4 && match.s1 > match.s2) match.winner = match.p1;
+                    else if (match.s2 >= 4 && match.s2 > match.s1) match.winner = match.p2;
+                    else match.winner = null;
                 }
-
                 setRounds(newRounds);
             };
 
             const confirmMatchResult = () => {
                 if (!activeMatchParams) return;
                 const { rIndex, mIndex } = activeMatchParams;
-                
                 const newRounds = rounds.map(r => r.map(m => {
                     if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) };
                     return { ...m };
@@ -565,50 +536,38 @@
                 const match = newRounds[rIndex][mIndex];
                 let currentWinner = match.winner;
 
-                if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
-                    if (!currentWinner) {
-                        if (match.s1 > match.s2) currentWinner = match.p1;
-                        else if (match.s2 > match.s1) currentWinner = match.p2;
-                    }
-                } else if (match.type === 'rr3') {
+                if (match.type === 'rr3') {
                     const ranking = getRR3Ranking(match);
-                    currentWinner = ranking[0].name; 
-                    setFinalResults({
-                        first: ranking[0].name,
-                        second: ranking[1].name,
-                        third: ranking[2].name
-                    });
+                    currentWinner = ranking[0].name;
+                    setFinalResults({ first: ranking[0].name, second: ranking[1].name, third: ranking[2].name });
+                } else {
+                    if (!currentWinner) {
+                         if (match.s1 > match.s2) currentWinner = match.p1;
+                         else if (match.s2 > match.s1) currentWinner = match.p2;
+                    }
                 }
-
-                if (currentWinner) {
-                    match.winner = currentWinner;
-                }
-
+                if (currentWinner) match.winner = currentWinner;
                 setRounds(newRounds);
 
+                // Auto Navigation
                 let nextUnfinishedIndex = -1;
                 const currentRoundMatches = newRounds[rIndex];
-                
-                if (match.type === 'normal') {
+                if (match.type !== 'rr3') {
                     for (let i = mIndex + 1; i < currentRoundMatches.length; i++) {
-                        const m = currentRoundMatches[i];
-                        if (m.type !== 'seed' && !m.winner) {
-                            nextUnfinishedIndex = i;
-                            break;
+                        if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
+                            nextUnfinishedIndex = i; break;
                         }
                     }
                     if (nextUnfinishedIndex === -1) {
                         for (let i = 0; i < mIndex; i++) {
-                            const m = currentRoundMatches[i];
-                            if (m.type !== 'seed' && !m.winner) {
-                                nextUnfinishedIndex = i;
-                                break;
+                            if (currentRoundMatches[i].type !== 'seed' && !currentRoundMatches[i].winner) {
+                                nextUnfinishedIndex = i; break;
                             }
                         }
                     }
                 }
 
-                if (nextUnfinishedIndex !== -1 && match.type === 'normal') {
+                if (nextUnfinishedIndex !== -1 && match.type !== 'rr3') {
                     setActiveMatchParams({ rIndex, mIndex: nextUnfinishedIndex });
                 } else {
                     setView('bracket');
@@ -617,43 +576,28 @@
             };
             
             const executeReset = () => {
-                setView('setup');
-                setRounds([]);
-                setWinner(null);
-                setFinalResults(null);
-                setNextRoundReady(false);
-                setShowResetConfirm(false);
+                setView('setup'); setRounds([]); setWinner(null); setFinalResults(null); setNextRoundReady(false); setShowResetConfirm(false);
+                setRoomId(Math.random().toString(36).substring(2, 8).toUpperCase());
                 localStorage.removeItem('tournament_data_v1');
+                window.history.replaceState({}, '', window.location.pathname);
             };
 
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4">
+                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4 scroll-touch h-full overflow-y-auto">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                                    <Icons.Users className="text-blue-500" size={24} />
-                                    建立賽程
-                                </h2>
+                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Icons.Users className="text-blue-500" size={24} />建立賽程</h2>
                             </div>
-
                             <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
                                 <button onClick={() => setInputMode('text')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${inputMode === 'text' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>輸入名單</button>
                                 <button onClick={() => setInputMode('number')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${inputMode === 'number' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>輸入人數</button>
                             </div>
-                            
                             <div className="mb-4">
                                 {inputMode === 'text' ? (
                                     <>
-                                        <textarea
-                                            className="w-full h-48 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-base"
-                                            placeholder="請輸入名字&#10;一行一個"
-                                            value={inputText}
-                                            onChange={(e) => setInputText(e.target.value)}
-                                        />
-                                        <div className="flex justify-between mt-2">
-                                            <button onClick={handleSampleData} className="text-xs text-blue-500 hover:underline">帶入範例</button>
-                                        </div>
+                                        <textarea className="w-full h-48 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-base" placeholder="請輸入名字&#10;一行一個" value={inputText} onChange={(e) => setInputText(e.target.value)} />
+                                        <div className="flex justify-between mt-2"><button onClick={handleSampleData} className="text-xs text-blue-500 hover:underline">帶入範例</button></div>
                                     </>
                                 ) : (
                                     <div className="py-8 flex flex-col items-center">
@@ -665,31 +609,16 @@
                                     </div>
                                 )}
                             </div>
-
                             <div className="flex items-center mb-6 bg-gray-50 p-3 rounded-lg">
-                                <input 
-                                    id="shuffleRound2" 
-                                    type="checkbox" 
-                                    checked={shuffleRound2}
-                                    onChange={(e) => setShuffleRound2(e.target.checked)}
-                                    className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                                />
-                                <label htmlFor="shuffleRound2" className="ml-2 text-sm text-gray-700 font-medium select-none">
-                                    第二輪重新抽籤 (增加隨機性)
-                                </label>
+                                <input id="shuffleRound2" type="checkbox" checked={shuffleRound2} onChange={(e) => setShuffleRound2(e.target.checked)} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500" />
+                                <label htmlFor="shuffleRound2" className="ml-2 text-sm text-gray-700 font-medium select-none">第二輪重新抽籤 (增加隨機性)</label>
                             </div>
-                            
                             <div className="bg-blue-50 p-3 rounded-lg mb-4 text-xs text-blue-700 space-y-1">
                                 <div className="flex gap-2"><Icons.Shuffle size={14} className="mt-0.5"/> <span><strong>第一輪</strong>：隨機洗牌後配對。</span></div>
                                 <div className="flex gap-2"><Icons.List size={14} className="mt-0.5"/> <span><strong>後續輪次</strong>：依序配對，若人數為奇數則隨機抽輪空。</span></div>
                                 <div className="flex gap-2"><Icons.LayoutList size={14} className="mt-0.5"/> <span><strong>特殊賽制</strong>：剩 4 人冠軍/季軍賽；剩 3 人循環賽；剩 2 人決賽。</span></div>
                             </div>
-
-                            <button onClick={generateFirstRound} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 text-lg active:scale-[0.98] transition-transform">
-                                <Icons.Zap size={20} /> 開始第一輪對戰
-                            </button>
-                            
-                            {/* Footer Spacer for Scrolling */}
+                            <button onClick={generateFirstRound} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2 text-lg active:scale-[0.98] transition-transform"><Icons.Zap size={20} /> 開始第一輪對戰</button>
                             <div className="h-20"></div>
                         </div>
                     </div>
@@ -700,152 +629,65 @@
                 <div className="flex flex-col h-full safe-area-pt">
                     <div className="flex-1 flex flex-col relative overflow-auto no-scrollbar" ref={contentRef} data-screenshot-target="true">
                         {winner && (
-                            <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0">
+                            <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0 mx-4 mt-4">
                                 <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
                                 <h2 className="text-3xl font-extrabold text-yellow-700">比賽結束！</h2>
-                                
                                 {finalResults ? (
                                     <div className="mt-6 w-full max-w-xs space-y-3">
-                                        <div className="bg-yellow-100 p-3 rounded-lg border border-yellow-200 flex items-center justify-between">
-                                            <div className="flex items-center gap-2"><Icons.Medal className="text-yellow-600" size={20}/> <span className="font-bold text-yellow-800">冠軍</span></div>
-                                            <span className="font-bold text-lg">{finalResults.first}</span>
-                                        </div>
-                                        <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 flex items-center justify-between">
-                                            <div className="flex items-center gap-2"><Icons.Medal className="text-gray-500" size={20}/> <span className="font-bold text-gray-600">亞軍</span></div>
-                                            <span className="font-bold text-lg">{finalResults.second}</span>
-                                        </div>
-                                        <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 flex items-center justify-between">
-                                            <div className="flex items-center gap-2"><Icons.Medal className="text-orange-600" size={20}/> <span className="font-bold text-orange-800">季軍</span></div>
-                                            <span className="font-bold text-lg">{finalResults.third}</span>
-                                        </div>
-                                        {finalResults.fourth && (
-                                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between">
-                                                <div className="flex items-center gap-2"><span className="text-gray-400 font-bold ml-1">4.</span> <span className="font-bold text-slate-600">殿軍</span></div>
-                                                <span className="font-bold text-lg text-slate-500">{finalResults.fourth}</span>
-                                            </div>
-                                        )}
+                                        <div className="bg-yellow-100 p-3 rounded-lg border border-yellow-200 flex items-center justify-between"><div className="flex items-center gap-2"><Icons.Medal className="text-yellow-600" size={20}/> <span className="font-bold text-yellow-800">冠軍</span></div><span className="font-bold text-lg">{finalResults.first}</span></div>
+                                        <div className="bg-gray-100 p-3 rounded-lg border border-gray-200 flex items-center justify-between"><div className="flex items-center gap-2"><Icons.Medal className="text-gray-500" size={20}/> <span className="font-bold text-gray-600">亞軍</span></div><span className="font-bold text-lg">{finalResults.second}</span></div>
+                                        <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 flex items-center justify-between"><div className="flex items-center gap-2"><Icons.Medal className="text-orange-600" size={20}/> <span className="font-bold text-orange-800">季軍</span></div><span className="font-bold text-lg">{finalResults.third}</span></div>
+                                        {finalResults.fourth && <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between"><div className="flex items-center gap-2"><span className="text-gray-400 font-bold ml-1">4.</span> <span className="font-bold text-slate-600">殿軍</span></div><span className="font-bold text-lg text-slate-500">{finalResults.fourth}</span></div>}
                                     </div>
-                                ) : (
-                                    <p className="text-xl mt-2 text-yellow-800 font-medium">總冠軍：{winner}</p>
-                                )}
+                                ) : ( <p className="text-xl mt-2 text-yellow-800 font-medium">總冠軍：{winner}</p> )}
                             </div>
                         )}
-
                         {nextRoundReady && !winner && (
                             <div className="sticky top-20 z-20 flex justify-center mb-6 animate-bounce-in px-4 flex-shrink-0">
-                                <button 
-                                    onClick={handleGenerateNextRound}
-                                    className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 hover:bg-black active:scale-95 transition-all font-bold border-4 border-white w-full sm:w-auto justify-center"
-                                >
-                                    <Icons.Shuffle size={18} />
-                                    <span>該輪結束，隨機抽輪空 (若奇數)</span>
-                                </button>
+                                <button onClick={handleGenerateNextRound} className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 hover:bg-black active:scale-95 transition-all font-bold border-4 border-white w-full sm:w-auto justify-center"><Icons.Shuffle size={18} /><span>該輪結束，隨機抽輪空 (若奇數)</span></button>
                             </div>
                         )}
-
                         <div className="flex-1 overflow-auto pb-12 no-scrollbar">
                             <div className="inline-flex min-w-full p-4 gap-4 justify-center">
-                                {rounds.map((round, rIndex) => {
-                                    const totalMatches = round.length;
-                                    const completedMatches = round.filter(m => m.winner).length;
-
-                                    return (
-                                        <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
-                                            <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2 flex flex-col gap-1 items-center bg-opacity-90 backdrop-blur-sm rounded-b-lg">
-                                                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-                                                    {round[0].type === 'rr3' ? '循環賽 (決賽)' : (round[0].type === 'final' ? '決賽 & 季軍賽' : `第 ${rIndex + 1} 輪`)}
-                                                </h3>
-                                                <span className="text-xs text-gray-500 font-mono bg-gray-200 px-2 py-0.5 rounded-full">
-                                                   完成 {completedMatches} / {totalMatches} 組
-                                                </span>
-                                            </div>
-                                            
-                                            {round.map((match, mIndex) => {
-                                                const isSeed = match.type === 'seed';
-                                                const isRR3 = match.type === 'rr3';
-                                                const isFinal = match.type === 'final';
-                                                const isBronze = match.type === 'bronze';
-                                                
-                                                return (
-                                                    <div 
-                                                        key={match.id} 
-                                                        onClick={() => openMatchView(rIndex, mIndex)}
-                                                        className={`
-                                                            relative flex flex-col justify-center bg-white border rounded-xl shadow-sm overflow-hidden transition-all duration-200 select-none
-                                                            ${match.winner && !isSeed ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}
-                                                            ${!match.winner && !isSeed ? 'active:scale-95 active:bg-blue-50' : ''}
-                                                            ${isSeed ? 'bg-yellow-50/50 border-yellow-200' : ''}
-                                                            ${isRR3 ? 'border-l-4 border-l-purple-500' : ''}
-                                                            ${isFinal ? 'border-2 border-yellow-400 ring-2 ring-yellow-100' : ''}
-                                                            ${isBronze ? 'border-l-4 border-l-orange-400' : ''}
-                                                        `}
-                                                    >
-                                                        {isRR3 && (
-                                                            <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">
-                                                                3人循環賽
-                                                            </div>
-                                                        )}
-                                                        {isFinal && (
-                                                            <div className="bg-yellow-50 p-2 text-center text-xs font-bold text-yellow-700 border-b border-yellow-100 flex justify-center items-center gap-1">
-                                                                <Icons.Trophy size={12}/> 冠軍賽
-                                                            </div>
-                                                        )}
-                                                        {isBronze && (
-                                                            <div className="bg-orange-50 p-2 text-center text-xs font-bold text-orange-700 border-b border-orange-100">
-                                                                季軍賽
-                                                            </div>
-                                                        )}
-
-                                                        {isSeed ? (
-                                                            <div className="p-4 flex items-center justify-between">
-                                                                <div className="flex items-center gap-2 overflow-hidden">
-                                                                    <Icons.Crown size={16} className="text-yellow-500 shrink-0" />
-                                                                    <span className="font-bold text-gray-800 truncate">{match.p1}</span>
-                                                                </div>
-                                                                <span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full whitespace-nowrap">輪空晉級</span>
-                                                            </div>
-                                                        ) : isRR3 ? (
-                                                            <div className="p-0">
-                                                                {[match.p1, match.p2, match.p3].map((p, idx) => (
-                                                                    <div key={idx} className={`px-4 py-2 flex justify-between items-center border-b border-gray-100 last:border-0 ${match.winner === p && p ? 'bg-blue-50' : ''}`}>
-                                                                        <span className={`text-sm font-medium truncate ${!p ? 'text-gray-300' : 'text-gray-800'}`}>{p}</span>
-                                                                        {match.winner === p && <Icons.CheckCircle size={14} className="text-blue-500"/>}
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <div className={`px-4 py-3 flex justify-between items-center border-b border-gray-100 ${match.winner === match.p1 ? 'bg-blue-50' : ''}`}>
-                                                                    <span className={`text-sm font-medium truncate ${!match.p1 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p1}</span>
-                                                                    {match.p1 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s1}</span>}
-                                                                </div>
-                                                                <div className={`px-4 py-3 flex justify-between items-center ${match.winner === match.p2 ? 'bg-blue-50' : ''}`}>
-                                                                    <span className={`text-sm font-medium truncate ${!match.p2 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p2}</span>
-                                                                    {match.p2 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s2}</span>}
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                        
-                                                        {!match.winner && !isSeed && (
-                                                            <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity flex items-center justify-center pointer-events-none">
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
+                                {rounds.map((round, rIndex) => (
+                                    <div key={`round-${rIndex}`} className="flex flex-col justify-start relative shrink-0 gap-4 min-w-[16rem]">
+                                        <div className="text-center sticky top-0 bg-gray-50 py-2 z-10 border-b border-gray-200 mb-2 flex flex-col gap-1 items-center bg-opacity-90 backdrop-blur-sm rounded-b-lg">
+                                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">{round[0].type === 'rr3' ? '循環賽 (決賽)' : (round[0].type === 'final' ? '決賽 & 季軍賽' : `第 ${rIndex + 1} 輪`)}</h3>
+                                            <span className="text-xs text-gray-500 font-mono bg-gray-200 px-2 py-0.5 rounded-full">完成 {round.filter(m => m.winner).length} / {round.length} 組</span>
                                         </div>
-                                    );
-                                })}
+                                        {round.map((match, mIndex) => (
+                                            <div key={match.id} onClick={() => openMatchView(rIndex, mIndex)} className={`relative flex flex-col justify-center bg-white border rounded-xl shadow-sm overflow-hidden transition-all duration-200 select-none ${match.winner && match.type !== 'seed' ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'} ${!match.winner && match.type !== 'seed' ? 'active:scale-95 active:bg-blue-50' : ''} ${match.type === 'seed' ? 'bg-yellow-50/50 border-yellow-200' : ''} ${match.type === 'rr3' ? 'border-l-4 border-l-purple-500' : ''} ${match.type === 'final' ? 'border-2 border-yellow-400 ring-2 ring-yellow-100' : ''} ${match.type === 'bronze' ? 'border-l-4 border-l-orange-400' : ''}`}>
+                                                {match.type === 'rr3' && <div className="bg-purple-50 p-2 text-center text-xs font-bold text-purple-700 border-b border-purple-100">3人循環賽</div>}
+                                                {match.type === 'final' && <div className="bg-yellow-50 p-2 text-center text-xs font-bold text-yellow-700 border-b border-yellow-100 flex justify-center items-center gap-1"><Icons.Trophy size={12}/> 冠軍賽</div>}
+                                                {match.type === 'bronze' && <div className="bg-orange-50 p-2 text-center text-xs font-bold text-orange-700 border-b border-orange-100">季軍賽</div>}
+                                                {match.type === 'seed' ? (
+                                                    <div className="p-4 flex items-center justify-between"><div className="flex items-center gap-2 overflow-hidden"><Icons.Crown size={16} className="text-yellow-500 shrink-0" /><span className="font-bold text-gray-800 truncate">{match.p1}</span></div><span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full whitespace-nowrap">輪空晉級</span></div>
+                                                ) : match.type === 'rr3' ? (
+                                                    <div className="p-0">
+                                                        {[match.p1, match.p2, match.p3].map((p, idx) => (
+                                                            <div key={idx} className={`px-4 py-2 flex justify-between items-center border-b border-gray-100 last:border-0 ${match.winner === p && p ? 'bg-blue-50' : ''}`}><span className={`text-sm font-medium truncate ${!p ? 'text-gray-300' : 'text-gray-800'}`}>{p}</span>{match.winner === p && <Icons.CheckCircle size={14} className="text-blue-500"/>}</div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <div className={`px-4 py-3 flex justify-between items-center border-b border-gray-100 ${match.winner === match.p1 ? 'bg-blue-50' : ''}`}><span className={`text-sm font-medium truncate ${!match.p1 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p1}</span>{match.p1 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s1}</span>}</div>
+                                                        <div className={`px-4 py-3 flex justify-between items-center ${match.winner === match.p2 ? 'bg-blue-50' : ''}`}><span className={`text-sm font-medium truncate ${!match.p2 ? 'text-gray-300' : 'text-gray-800'}`}>{match.p2}</span>{match.p2 && <span className="text-gray-500 font-mono font-bold ml-2">{match.s2}</span>}</div>
+                                                    </>
+                                                )}
+                                                {!match.winner && match.type !== 'seed' && <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity flex items-center justify-center pointer-events-none"></div>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
-                    
                     <div className="bg-white border-t p-4 flex justify-center safe-area-pb">
-                         <button onClick={handleScreenshot} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform" title="截圖">
-                             <Icons.Camera size={16} /> 截圖
-                         </button>
+                         <button onClick={handleScreenshot} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform" title="截圖"><Icons.Camera size={16} /> 截圖</button>
+                         <button onClick={handleShare} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform ml-2" title="分享/連線"><Icons.Share size={16} /> 分享連線</button>
                          <div className="h-10 w-full"></div>
                     </div>
+                    {connectionStatus && <div className={`fixed top-16 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg z-50 text-sm font-bold animate-bounce-in ${connectionStatus.error ? 'bg-red-500 text-white' : 'bg-green-500 text-white'}`}>{connectionStatus.message || (connectionStatus.error ? "連線錯誤" : "已儲存")}</div>}
                 </div>
             );
 
@@ -854,79 +696,47 @@
                 const { rIndex, mIndex } = activeMatchParams;
                 const match = rounds[rIndex][mIndex];
 
-                // Determine next action text
                 let actionText = "完成";
                 if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     const currentRoundMatches = rounds[rIndex];
                     let hasNext = false;
                     for (let i = 0; i < currentRoundMatches.length; i++) {
-                        if (i !== mIndex && !currentRoundMatches[i].winner) {
-                            hasNext = true; break;
-                        }
+                        if (i !== mIndex && !currentRoundMatches[i].winner) { hasNext = true; break; }
                     }
                     if (hasNext) actionText = "下一場";
                 }
                 
-                // Calculate Progress for display
-                const currentRoundMatches = rounds[rIndex];
-                const total = currentRoundMatches.length;
-                const completed = currentRoundMatches.filter(m => m.winner).length;
+                const completed = rounds[rIndex].filter(m => m.winner).length;
+                const total = rounds[rIndex].length;
 
                 if (match.type === 'normal' || match.type === 'final' || match.type === 'bronze') {
                     return (
                         <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
                             <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
                                 <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
-                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />{match.type === 'final' ? '冠軍賽' : (match.type === 'bronze' ? '季軍賽' : '對戰計分')}</h2>
+                                <div className="flex flex-col items-center">
+                                    <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />{match.type === 'final' ? '冠軍賽' : (match.type === 'bronze' ? '季軍賽' : '對戰計分')}</h2>
+                                    <span className="text-xs text-gray-500 font-bold mt-0.5">第 {rIndex + 1} 輪：完成 {completed} / {total}</span>
+                                </div>
                                 <div className="flex justify-end min-w-[4rem]"> 
                                      {match.winner && (
-                                        <button 
-                                            onClick={confirmMatchResult} 
-                                            className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap"
-                                        >
-                                            <span>{actionText}</span>
-                                            <Icons.CheckCircle size={16} />
-                                        </button>
+                                        <button onClick={confirmMatchResult} className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap"><span>{actionText}</span><Icons.CheckCircle size={16} /></button>
                                      )}
                                 </div>
                             </div>
-                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
-                                {/* Progress Indicator */}
-                                <div className="absolute top-3 left-4 z-10 pointer-events-none">
-                                    <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
-                                        第 {rIndex + 1} 輪：完成 {completed} / {total}
-                                    </span>
-                                </div>
-
+                            <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative scroll-touch">
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
-                                    <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
-                                    <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
-                                    <div className="flex items-center gap-6">
-                                        <button onClick={() => updateMatchScore(null, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{match.s1}</div>
-                                        <button onClick={() => updateMatchScore(null, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
-                                    </div>
+                                    <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div><div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
+                                    <div className="flex items-center gap-6"><button onClick={() => updateMatchScore(null, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button><div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{match.s1}</div><button onClick={() => updateMatchScore(null, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button></div>
                                     {match.s1 >= 4 && match.winner === match.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
                                 <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
-                                
-                                {/* Mobile VS Badge */}
-                                <div className="md:hidden flex items-center justify-center w-full py-2 bg-white z-10">
-                                    <div className="w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center font-black text-gray-300 text-lg border-4 border-gray-100">VS</div>
-                                </div>
-
+                                <div className="md:hidden flex items-center justify-center w-full py-2 bg-white z-10"><div className="w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center font-black text-gray-300 text-lg border-4 border-gray-100">VS</div></div>
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${match.winner === match.p2 ? 'bg-blue-50' : 'bg-white'}`}>
-                                    <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p2}</div>
-                                    <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
-                                    <div className="flex items-center gap-6">
-                                        <button onClick={() => updateMatchScore(null, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                        <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{match.s2}</div>
-                                        <button onClick={() => updateMatchScore(null, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
-                                    </div>
+                                    <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p2}</div><div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
+                                    <div className="flex items-center gap-6"><button onClick={() => updateMatchScore(null, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button><div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{match.s2}</div><button onClick={() => updateMatchScore(null, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button></div>
                                     {match.s2 >= 4 && match.winner === match.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
-                                
-                                {/* Spacing for bottom content (Mobile Only to prevent layout shift on desktop) */}
                                 <div className="h-20 w-full md:hidden"></div>
                             </div>
                         </div>
@@ -943,75 +753,33 @@
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.List className="text-blue-500" size={20} />循環賽積分表</h2>
                                 <div className="flex justify-end min-w-[4rem]">
                                     {allSubMatchesFinished && (
-                                        <button 
-                                            onClick={confirmMatchResult} 
-                                            className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap"
-                                            title="完成並晉級"
-                                        >
-                                            <span>完成</span>
-                                            <Icons.CheckCircle size={16} />
-                                        </button>
+                                        <button onClick={confirmMatchResult} className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap" title="完成並晉級"><span>完成</span><Icons.CheckCircle size={16} /></button>
                                     )}
                                 </div>
                             </div>
                             
-                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6 pb-12">
+                            <div className="flex-1 overflow-y-auto p-4 w-full max-w-3xl mx-auto space-y-6 pb-12 scroll-touch">
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                     <div className="bg-blue-600 text-white p-3 font-bold text-center">即時戰績</div>
                                     <div className="p-4">
-                                        <div className="grid grid-cols-4 gap-2 text-sm text-gray-500 border-b pb-2 mb-2 font-bold text-center">
-                                            <div className="text-left pl-2">選手</div>
-                                            <div>勝</div>
-                                            <div>分</div>
-                                            <div>狀態</div>
-                                        </div>
+                                        <div className="grid grid-cols-4 gap-2 text-sm text-gray-500 border-b pb-2 mb-2 font-bold text-center"><div className="text-left pl-2">選手</div><div>勝</div><div>分</div><div>狀態</div></div>
                                         {[match.p1, match.p2, match.p3].map(p => {
-                                            let wins = 0;
-                                            let score = 0;
-                                            match.subMatches.forEach(sub => {
-                                                if (sub.winner === p) wins++;
-                                                if (sub.p1 === p) score += sub.s1;
-                                                if (sub.p2 === p) score += sub.s2;
-                                            });
+                                            let wins = 0; let score = 0;
+                                            match.subMatches.forEach(sub => { if (sub.winner === p) wins++; if (sub.p1 === p) score += sub.s1; if (sub.p2 === p) score += sub.s2; });
                                             return (
-                                                <div key={p} className="grid grid-cols-4 gap-2 items-center py-2 text-center">
-                                                    <div className="text-left pl-2 font-bold text-gray-800 truncate">{p}</div>
-                                                    <div className="font-mono">{wins}</div>
-                                                    <div className="font-mono text-gray-400">{score}</div>
-                                                    <div>
-                                                        {currentLeader === p && <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded-full font-bold">目前領先</span>}
-                                                    </div>
-                                                </div>
+                                                <div key={p} className="grid grid-cols-4 gap-2 items-center py-2 text-center"><div className="text-left pl-2 font-bold text-gray-800 truncate">{p}</div><div className="font-mono">{wins}</div><div className="font-mono text-gray-400">{score}</div><div>{currentLeader === p && <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded-full font-bold">目前領先</span>}</div></div>
                                             )
                                         })}
                                     </div>
                                 </div>
-
                                 <div className="space-y-4">
                                     {match.subMatches.map((sub, idx) => (
-                                        <div 
-                                            key={sub.id} 
-                                            onClick={() => openSubMatchView(idx)}
-                                            className={`bg-white rounded-xl shadow-sm border border-gray-200 p-4 relative overflow-hidden active:scale-95 transition-transform select-none
-                                                ${sub.winner ? 'border-blue-400 ring-1 ring-blue-100' : ''}
-                                            `}
-                                        >
-                                            <div className="text-xs font-bold text-gray-400 mb-2 text-center flex justify-between items-center">
-                                                <span>GAME {idx + 1}</span>
-                                                {sub.winner ? <span className="text-blue-500 flex items-center gap-1"><Icons.CheckCircle size={12}/> 已完賽</span> : <span className="text-gray-300">點擊開始</span>}
-                                            </div>
+                                        <div key={sub.id} onClick={() => openSubMatchView(idx)} className={`bg-white rounded-xl shadow-sm border border-gray-200 p-4 relative overflow-hidden active:scale-95 transition-transform select-none ${sub.winner ? 'border-blue-400 ring-1 ring-blue-100' : ''}`}>
+                                            <div className="text-xs font-bold text-gray-400 mb-2 text-center flex justify-between items-center"><span>GAME {idx + 1}</span>{sub.winner ? <span className="text-blue-500 flex items-center gap-1"><Icons.CheckCircle size={12}/> 已完賽</span> : <span className="text-gray-300">點擊開始</span>}</div>
                                             <div className="flex items-center justify-between gap-2">
-                                                <div className="flex flex-col items-center flex-1">
-                                                    <div className={`font-bold text-lg mb-1 text-center break-words w-full ${sub.winner===sub.p1 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p1}</div>
-                                                    <div className="text-2xl font-bold text-gray-600">{sub.s1}</div>
-                                                </div>
-                                                
+                                                <div className="flex flex-col items-center flex-1"><div className={`font-bold text-lg mb-1 text-center break-words w-full ${sub.winner===sub.p1 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p1}</div><div className="text-2xl font-bold text-gray-600">{sub.s1}</div></div>
                                                 <div className="font-black text-gray-200 text-xl">VS</div>
-
-                                                <div className="flex flex-col items-center flex-1">
-                                                    <div className={`font-bold text-lg mb-1 text-center break-words w-full ${sub.winner===sub.p2 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p2}</div>
-                                                    <div className="text-2xl font-bold text-gray-600">{sub.s2}</div>
-                                                </div>
+                                                <div className="flex flex-col items-center flex-1"><div className={`font-bold text-lg mb-1 text-center break-words w-full ${sub.winner===sub.p2 ? 'text-blue-600' : 'text-gray-800'}`}>{sub.p2}</div><div className="text-2xl font-bold text-gray-600">{sub.s2}</div></div>
                                             </div>
                                             <div className="absolute inset-0 bg-black/5 opacity-0 active:opacity-10 transition-opacity pointer-events-none"></div>
                                         </div>
@@ -1026,66 +794,37 @@
 
             const renderSubMatchView = () => {
                 if (!activeMatchParams || activeMatchParams.subMatchIndex === undefined) return null;
-                
                 const { rIndex, mIndex, subMatchIndex } = activeMatchParams;
                 const parentMatch = rounds[rIndex][mIndex];
                 const subMatch = parentMatch.subMatches[subMatchIndex];
-
-                // Calculate sub-match progress
-                const total = 3;
+                
                 const completed = parentMatch.subMatches.filter(s => s.winner).length;
 
                 return (
                     <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
                         <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30">
                             <button onClick={closeSubMatchView} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
-                            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />循環賽 G{subMatchIndex + 1}</h2>
+                            <div className="flex flex-col items-center">
+                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.Swords className="text-red-500" size={20} />循環賽 G{subMatchIndex + 1}</h2>
+                                <span className="text-xs text-gray-500 font-bold mt-0.5">循環賽：完成 {completed} / 3</span>
+                            </div>
                             <div className="flex justify-end min-w-[4rem]">
                                 {subMatch.winner && (
-                                    <button 
-                                        onClick={closeSubMatchView} 
-                                        className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap"
-                                        title="確認並返回"
-                                    >
-                                        <span>確認</span>
-                                        <Icons.CheckCircle size={16} />
-                                    </button>
+                                    <button onClick={closeSubMatchView} className="bg-green-500 text-white px-3 py-1.5 rounded-full shadow-lg animate-bounce-in flex items-center gap-1 active:scale-90 transition-transform font-bold text-sm whitespace-nowrap" title="確認並返回"><span>確認</span><Icons.CheckCircle size={16} /></button>
                                 )}
                             </div>
                         </div>
-                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto relative">
-                             {/* Progress Indicator for Sub Match */}
-                            <div className="absolute top-3 left-4 z-10 pointer-events-none">
-                                <span className="bg-gray-100/90 backdrop-blur text-gray-500 text-xs font-bold px-2 py-1 rounded-full shadow-sm border border-gray-200">
-                                    循環賽：完成 {completed} / {total}
-                                </span>
-                            </div>
-
+                        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto scroll-touch relative">
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${subMatch.winner === subMatch.p1 ? 'bg-red-50' : 'bg-white'}`}>
-                                <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p1}</div>
-                                <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
-                                <div className="flex items-center gap-6">
-                                    <button onClick={() => updateMatchScore(subMatch.id, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{subMatch.s1}</div>
-                                    <button onClick={() => updateMatchScore(subMatch.id, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
-                                </div>
+                                <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p1}</div><div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
+                                <div className="flex items-center gap-6"><button onClick={() => updateMatchScore(subMatch.id, true, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button><div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{subMatch.s1}</div><button onClick={() => updateMatchScore(subMatch.id, true, 1)} className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center active:bg-red-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button></div>
                                 {subMatch.s1 >= 4 && subMatch.winner === subMatch.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                             </div>
                             <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
-                            
-                            {/* Mobile VS Badge */}
-                            <div className="md:hidden flex items-center justify-center w-full py-2 bg-white z-10">
-                                <div className="w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center font-black text-gray-300 text-lg border-4 border-gray-100">VS</div>
-                            </div>
-
+                            <div className="md:hidden flex items-center justify-center w-full py-2 bg-white z-10"><div className="w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center font-black text-gray-300 text-lg border-4 border-gray-100">VS</div></div>
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${subMatch.winner === subMatch.p2 ? 'bg-blue-50' : 'bg-white'}`}>
-                                <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p2}</div>
-                                <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
-                                <div className="flex items-center gap-6">
-                                    <button onClick={() => updateMatchScore(subMatch.id, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button>
-                                    <div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{subMatch.s2}</div>
-                                    <button onClick={() => updateMatchScore(subMatch.id, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button>
-                                </div>
+                                <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p2}</div><div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
+                                <div className="flex items-center gap-6"><button onClick={() => updateMatchScore(subMatch.id, false, -1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-400 active:bg-gray-100 active:scale-95 transition-transform"><Icons.Minus size={32} /></button><div className="text-[6rem] md:text-[8rem] leading-none font-bold text-gray-800 min-w-[1ch] text-center">{subMatch.s2}</div><button onClick={() => updateMatchScore(subMatch.id, false, 1)} className="w-16 h-16 rounded-full bg-blue-500 text-white shadow-lg flex items-center justify-center active:bg-blue-600 active:scale-95 transition-transform"><Icons.Plus size={32} /></button></div>
                                 {subMatch.s2 >= 4 && subMatch.winner === subMatch.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                             </div>
                             <div className="h-20 w-full md:hidden"></div>
@@ -1117,7 +856,7 @@
                         </header>
                     )}
 
-                    <main className={`flex-1 w-full max-w-7xl mx-auto p-4 ${view === 'setup' ? 'overflow-y-auto' : 'overflow-auto'}`}>
+                    <main className={`flex-1 w-full max-w-7xl mx-auto p-4 ${view === 'setup' ? 'overflow-y-auto scroll-touch' : 'overflow-auto scroll-touch'}`}>
                         {view === 'setup' && renderSetup()}
                         {view === 'bracket' && renderBracket()}
                         {view === 'match' && renderMatchView()}
