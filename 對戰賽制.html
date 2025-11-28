@@ -66,17 +66,21 @@
         const { useState, useEffect, useRef } = React;
 
         // ==========================================
-        // 🔴 請在此處貼上您的 Firebase Config 🔴
+        // 🔴 const firebaseConfig = {
+    apiKey: "AIzaSyB1TyJI105mk........",
+    authDomain: "beyblade-c57bb.firebaseapp.com",
+    projectId: "beyblade-c57bb",
+    storageBucket: "beyblade-c57bb.firebasestorage.app",
+    messagingSenderId: "618213078578",
+    appId: "1:618213078578:web:847a8e9f383ebb7a39ee2b",
+    measurementId: "G-T9XQFMQ9E1"
+}; 🔴
         // ==========================================
         const firebaseConfig = {
-  apiKey: "AIzaSyB1TyJI1O5mkl2n7iSWEFB9HqMyrqPM5XI",
-  authDomain: "beyblade-c57bb.firebaseapp.com",
-  projectId: "beyblade-c57bb",
-  storageBucket: "beyblade-c57bb.firebasestorage.app",
-  messagingSenderId: "618213078578",
-  appId: "1:618213078578:web:847a8e9f383ebb7a39ee2b",
-  measurementId: "G-T9XQFMQ9E1"
-};
+            // 請將大括號內的內容替換為您的設定
+            // 格式範例 (不用對齊，但要完整):
+            // apiKey: "AIzaSy...", authDomain: "...", projectId: "...", ...
+        };
         // ==========================================
 
         // 初始化 Firebase
@@ -89,6 +93,7 @@
                 console.log("Firebase initialized");
             } catch (e) {
                 console.error("Firebase init error:", e);
+                // 這裡不阻擋程式執行，讓它退回單機版
             }
         }
 
@@ -134,8 +139,8 @@
             const [finalResults, setFinalResults] = useState(null); 
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
+            
             const [shuffleRound2, setShuffleRound2] = useState(false);
-            const [roomId, setRoomId] = useState(null); // For cloud sync
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
@@ -143,83 +148,6 @@
             const [screenshotBlob, setScreenshotBlob] = useState(null); 
             const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
             const contentRef = useRef(null); 
-
-            // --- 雲端同步邏輯 ---
-            useEffect(() => {
-                // 1. 從 URL 讀取房間 ID
-                const params = new URLSearchParams(window.location.search);
-                let currentRoomId = params.get('room');
-                if (!currentRoomId) {
-                    currentRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-                }
-                setRoomId(currentRoomId);
-            }, []);
-
-            // 2. 讀取 LocalStorage (離線備援)
-            useEffect(() => {
-                const savedData = localStorage.getItem('tournament_data');
-                if (savedData) {
-                    try {
-                        const parsed = JSON.parse(savedData);
-                        // 簡單判斷：如果有資料且頁面還在 setup，就恢復
-                        if (parsed.rounds && parsed.rounds.length > 0 && view === 'setup') {
-                            setRounds(parsed.rounds);
-                            setWinner(parsed.winner);
-                            setFinalResults(parsed.finalResults);
-                            setNextRoundReady(parsed.nextRoundReady);
-                            setView('bracket');
-                        }
-                    } catch (e) { console.error(e); }
-                }
-            }, []);
-
-            // 3. 寫入資料 (Local + Cloud)
-            useEffect(() => {
-                if (rounds.length === 0 && view === 'setup') return; 
-                
-                const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
-                localStorage.setItem('tournament_data', JSON.stringify(data));
-
-                if (db && roomId) {
-                    const { doc, setDoc } = window.firebaseModules;
-                    setDoc(doc(db, "tournaments", roomId), data)
-                        .catch(err => console.error("Cloud save error", err));
-                }
-            }, [rounds, winner, finalResults, nextRoundReady, view, roomId]);
-
-            // 4. 監聽雲端變化 (Real-time Sync)
-            useEffect(() => {
-                if (!db || !roomId) return;
-                const { doc, onSnapshot } = window.firebaseModules;
-
-                const unsubscribe = onSnapshot(doc(db, "tournaments", roomId), (docSnap) => {
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        // 簡單同步：直接覆蓋 (實務上可加時間戳判斷)
-                        setRounds(data.rounds || []);
-                        setWinner(data.winner || null);
-                        setFinalResults(data.finalResults || null);
-                        setNextRoundReady(data.nextRoundReady || false);
-                        if (data.rounds && data.rounds.length > 0 && view === 'setup') {
-                            setView('bracket');
-                        }
-                    }
-                });
-                return () => unsubscribe();
-            }, [db, roomId]);
-
-            // --- 分享功能 ---
-            const handleShare = () => {
-                const url = new URL(window.location.href);
-                url.searchParams.set('room', roomId);
-                const fullUrl = url.toString();
-
-                if (navigator.share) {
-                    navigator.share({ title: '賽程表', url: fullUrl }).catch(console.error);
-                } else {
-                    navigator.clipboard.writeText(fullUrl).then(() => showAlert("連結已複製！"));
-                }
-            };
 
             const handleSampleData = () => {
                 const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`);
@@ -238,6 +166,79 @@
 
             const showAlert = (msg) => {
                 setAlertInfo({ show: true, message: msg });
+            };
+
+            // --- 雲端同步邏輯 ---
+            const [roomId, setRoomId] = useState(null);
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                let currentRoomId = params.get('room');
+                if (!currentRoomId) {
+                    currentRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+                }
+                setRoomId(currentRoomId);
+            }, []);
+
+            // Load Local
+            useEffect(() => {
+                const savedData = localStorage.getItem('tournament_data');
+                if (savedData) {
+                    try {
+                        const parsed = JSON.parse(savedData);
+                        if (parsed.rounds && parsed.rounds.length > 0 && view === 'setup') {
+                            setRounds(parsed.rounds);
+                            setWinner(parsed.winner);
+                            setFinalResults(parsed.finalResults);
+                            setNextRoundReady(parsed.nextRoundReady);
+                            setView('bracket');
+                        }
+                    } catch (e) {}
+                }
+            }, []);
+
+            // Save
+            useEffect(() => {
+                if (rounds.length === 0 && view === 'setup') return; 
+                const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
+                localStorage.setItem('tournament_data', JSON.stringify(data));
+                if (db && roomId) {
+                    const { doc, setDoc } = window.firebaseModules;
+                    setDoc(doc(db, "tournaments", roomId), data).catch(e => console.error("Sync error", e));
+                }
+            }, [rounds, winner, finalResults, nextRoundReady, view, roomId]);
+
+            // Sync
+            useEffect(() => {
+                if (!db || !roomId) return;
+                const { doc, onSnapshot } = window.firebaseModules;
+                const unsubscribe = onSnapshot(doc(db, "tournaments", roomId), (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        setRounds(data.rounds || []);
+                        setWinner(data.winner || null);
+                        setFinalResults(data.finalResults || null);
+                        setNextRoundReady(data.nextRoundReady || false);
+                        if (data.rounds && data.rounds.length > 0 && view === 'setup') {
+                            setView('bracket');
+                        }
+                    }
+                });
+                return () => unsubscribe();
+            }, [db, roomId]);
+
+            const handleShare = () => {
+                 if (!db) {
+                    showAlert("請先設定 Firebase Config 才能啟用雲端分享功能！");
+                    return;
+                }
+                const url = new URL(window.location.href);
+                url.searchParams.set('room', roomId);
+                const fullUrl = url.toString();
+                if (navigator.share) {
+                    navigator.share({ title: '賽程表', url: fullUrl }).catch(console.error);
+                } else {
+                    navigator.clipboard.writeText(fullUrl).then(() => showAlert("連結已複製！"));
+                }
             };
 
             // --- 截圖功能 ---
@@ -288,7 +289,7 @@
                     setIsScreenshotLoading(false);
                 } finally {
                     contentRef.current.style.background = originalBg;
-                    contentRef.current.style.height = ""; 
+                    contentRef.current.style.height = ""; // reset to auto/flex
                     contentRef.current.style.overflow = originalOverflow;
                 }
             };
@@ -297,14 +298,9 @@
                 if (!screenshotBlob) return;
                 const fileName = `bracket_${new Date().getTime()}.png`;
                 const file = new File([screenshotBlob], fileName, { type: 'image/png' });
-
                 if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-                    try {
-                        await navigator.share({ files: [file] });
-                        return; 
-                    } catch (error) {}
+                    try { await navigator.share({ files: [file] }); return; } catch (error) {}
                 }
-
                 const link = document.createElement('a');
                 link.download = fileName;
                 link.href = screenshotImage;
@@ -340,6 +336,7 @@
                     const p2 = players[i+1]; 
 
                     if (p2) {
+                        // 成對
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'normal',
@@ -350,6 +347,7 @@
                         });
                         i += 2;
                     } else {
+                        // 落單
                         round1Matches.push({
                             id: `r0-m${round1Matches.length}`,
                             type: 'seed',
@@ -365,14 +363,6 @@
                 setWinner(null);
                 setFinalResults(null);
                 setNextRoundReady(false);
-                
-                // Update URL
-                if (db && roomId) {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set('room', roomId);
-                    window.history.replaceState({}, '', url);
-                }
-
                 setView('bracket');
             };
 
@@ -695,13 +685,13 @@
                 setFinalResults(null);
                 setNextRoundReady(false);
                 setShowResetConfirm(false);
-                setRoomId(Math.random().toString(36).substring(2, 8).toUpperCase()); // Reset room
+                setRoomId(Math.random().toString(36).substring(2, 8).toUpperCase());
                 localStorage.removeItem('tournament_data');
-                window.history.replaceState({}, '', window.location.pathname); // Clear URL param
+                window.history.replaceState({}, '', window.location.pathname);
             };
 
             const renderSetup = () => (
-                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 h-full px-4">
+                <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4">
                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6">
@@ -1100,7 +1090,7 @@
                 const { rIndex, mIndex, subMatchIndex } = activeMatchParams;
                 const parentMatch = rounds[rIndex][mIndex];
                 const subMatch = parentMatch.subMatches[subMatchIndex];
-                
+
                 // Calculate sub-match progress
                 const total = 3;
                 const completed = parentMatch.subMatches.filter(s => s.winner).length;
