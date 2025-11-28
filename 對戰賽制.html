@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>混合賽制產生器 (雲端同步版)</title>
+    <title>混合賽制產生器 (連線診斷版)</title>
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -22,39 +22,23 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         
-        // 將 Firebase 函式掛載到 window 以便 React 使用
         window.firebaseModules = { initializeApp, getFirestore, doc, setDoc, onSnapshot, getDoc };
     </script>
     
     <style>
-        /* 手機優化 - 保持原生滾動 */
-        html, body {
-            margin: 0;
-            padding: 0;
-            -webkit-tap-highlight-color: transparent;
-            background-color: #f9fafb;
-        }
-
-        #root {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-
+        /* 手機優化 */
+        html, body { margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; background-color: #f9fafb; }
+        #root { min-height: 100vh; display: flex; flex-direction: column; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes bounce-in { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }
         @keyframes slide-up { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
         .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         .animate-bounce-in { animation: bounce-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
         .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
         .animate-spin-slow { animation: spin 2s linear infinite; }
-        
-        /* Safe Area Padding */
         .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
         .safe-area-pt { padding-top: env(safe-area-inset-top); }
     </style>
@@ -66,10 +50,10 @@
         const { useState, useEffect, useRef } = React;
 
         // ==========================================
-        // 🔴 Firebase Config (已根據您的圖片填入) 🔴
+        // 🔴 Firebase Config (已根據您的圖片修正) 🔴
         // ==========================================
         const firebaseConfig = {
-            apiKey: "AIzaSyB1TyJI105mkI2n7iSWEFB9HqMyrqPM5XI", // OCR 可能有誤，若連線失敗請檢查 I/l/1 的區別
+            apiKey: "AIzaSyB1TyJI105mkl2n7iSWEFB9HqMyrqPM5XI", 
             authDomain: "beyblade-c57bb.firebaseapp.com",
             projectId: "beyblade-c57bb",
             storageBucket: "beyblade-c57bb.firebasestorage.app",
@@ -79,21 +63,15 @@
         };
         // ==========================================
 
-        // 初始化 Firebase
         let db = null;
-        // 確保 window.firebaseModules 已加載且 config 有內容
-        if (window.firebaseModules && firebaseConfig.projectId) {
+        if (window.firebaseModules) {
             try {
                 const { initializeApp, getFirestore } = window.firebaseModules;
-                // 避免重複初始化
-                const app = initializeApp(firebaseConfig); 
+                const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
-                console.log("Firebase initialized successfully");
+                console.log("Firebase initialized");
             } catch (e) {
-                // 忽略重複初始化的錯誤
-                if (!e.message.includes("already exists")) {
-                    console.error("Firebase init error:", e);
-                }
+                console.error("Firebase init error:", e);
             }
         }
 
@@ -103,7 +81,6 @@
                 {path}
             </svg>
         );
-
         const Icons = {
             Trophy: (p) => <Icon {...p} path={<><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>} />,
             Users: (p) => <Icon {...p} path={<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} />,
@@ -142,7 +119,8 @@
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             const [shuffleRound2, setShuffleRound2] = useState(false);
-            const [roomId, setRoomId] = useState(null); // For cloud sync
+            const [roomId, setRoomId] = useState(null); 
+            const [connectionStatus, setConnectionStatus] = useState(null); // success, error
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
@@ -178,16 +156,31 @@
                 }
             }, []);
 
-            // Save
+            // Save & Check Connection
             useEffect(() => {
                 if (rounds.length === 0 && view === 'setup') return; 
+                
                 const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
                 localStorage.setItem('tournament_data', JSON.stringify(data));
+
                 if (db && roomId) {
-                    try {
-                        const { doc, setDoc } = window.firebaseModules;
-                        setDoc(doc(db, "tournaments", roomId), data).catch(e => console.error("Cloud save error", e));
-                    } catch(e) {}
+                    const { doc, setDoc } = window.firebaseModules;
+                    setDoc(doc(db, "tournaments", roomId), data)
+                        .then(() => {
+                            setConnectionStatus('success');
+                            // 3秒後隱藏成功訊息
+                            setTimeout(() => setConnectionStatus(null), 3000);
+                        })
+                        .catch(err => {
+                            console.error("Cloud save error", err);
+                            // 分析錯誤代碼
+                            let msg = "連線失敗";
+                            if (err.code === 'permission-denied') msg = "權限被拒絕 (請檢查 Firestore Rules)";
+                            if (err.code === 'unavailable') msg = "網路斷線";
+                            if (err.message.includes("client is offline")) msg = "用戶端離線";
+                            
+                            setConnectionStatus({ error: true, message: msg });
+                        });
                 }
             }, [rounds, winner, finalResults, nextRoundReady, view, roomId]);
 
@@ -207,9 +200,14 @@
                                 setView('bracket');
                             }
                         }
+                    }, (error) => {
+                         console.error("Snapshot error", error);
+                         let msg = "同步失敗";
+                         if (error.code === 'permission-denied') msg = "權限不足: 請至 Firebase Console -> Firestore -> Rules 將規則設為 allow read, write: if true;";
+                         setConnectionStatus({ error: true, message: msg });
                     });
                     return () => unsubscribe();
-                } catch(e) { console.error("Sync error", e); }
+                } catch(e) { console.error("Sync setup error", e); }
             }, [db, roomId]);
 
             const handleShare = () => {
@@ -275,7 +273,7 @@
                     setIsScreenshotLoading(false);
                 } finally {
                     contentRef.current.style.background = originalBg;
-                    contentRef.current.style.height = ""; // reset to auto/flex
+                    contentRef.current.style.height = ""; 
                     contentRef.current.style.overflow = originalOverflow;
                 }
             };
@@ -746,6 +744,7 @@
                                 <Icons.Zap size={20} /> 開始第一輪對戰
                             </button>
                             
+                            {/* Footer Spacer for Scrolling */}
                             <div className="h-20"></div>
                         </div>
                     </div>
@@ -905,6 +904,12 @@
                          </button>
                          <div className="h-10 w-full"></div>
                     </div>
+                    
+                    {connectionStatus && (
+                        <div className={`fixed top-16 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg z-50 text-sm font-bold animate-bounce-in ${connectionStatus.error ? 'bg-red-500 text-white' : 'bg-green-500 text-white'}`}>
+                            {connectionStatus.message || (connectionStatus.error ? "連線錯誤" : "已儲存")}
+                        </div>
+                    )}
                 </div>
             );
 
@@ -926,7 +931,7 @@
                     if (hasNext) actionText = "下一場";
                 }
                 
-                // Calculate Progress for display
+                // Calculate Progress
                 const currentRoundMatches = rounds[rIndex];
                 const total = currentRoundMatches.length;
                 const completed = currentRoundMatches.filter(m => m.winner).length;
@@ -957,6 +962,7 @@
                                     </span>
                                 </div>
 
+                                {/* 修正：使用 justify-center 讓內容垂直置中，移除 pt-16，底部隱形區塊已設為 md:hidden */}
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 border-b md:border-b-0 md:border-r border-gray-200 transition-colors ${match.winner === match.p1 ? 'bg-red-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p1}</div>
                                     <div className="text-sm text-red-500 font-bold tracking-widest uppercase mb-8">Red</div>
@@ -968,6 +974,12 @@
                                     {match.s1 >= 4 && match.winner === match.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
                                 <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
+                                
+                                {/* Mobile VS Badge */}
+                                <div className="md:hidden flex items-center justify-center w-full py-2 bg-white z-10">
+                                    <div className="w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center font-black text-gray-300 text-lg border-4 border-gray-100">VS</div>
+                                </div>
+
                                 <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${match.winner === match.p2 ? 'bg-blue-50' : 'bg-white'}`}>
                                     <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{match.p2}</div>
                                     <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
@@ -979,7 +991,7 @@
                                     {match.s2 >= 4 && match.winner === match.p2 && <div className="mt-6 text-blue-600 font-bold text-xl animate-bounce">WINNER</div>}
                                 </div>
                                 
-                                {/* Spacing for bottom content */}
+                                {/* Spacing for bottom content (Mobile Only to prevent layout shift on desktop) */}
                                 <div className="h-20 w-full md:hidden"></div>
                             </div>
                         </div>
@@ -1125,6 +1137,12 @@
                                 {subMatch.s1 >= 4 && subMatch.winner === subMatch.p1 && <div className="mt-6 text-red-600 font-bold text-xl animate-bounce">WINNER</div>}
                             </div>
                             <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg items-center justify-center font-black text-gray-300 text-xl border-4 border-gray-100 z-10">VS</div>
+                            
+                            {/* Mobile VS Badge */}
+                            <div className="md:hidden flex items-center justify-center w-full py-2 bg-white z-10">
+                                <div className="w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center font-black text-gray-300 text-lg border-4 border-gray-100">VS</div>
+                            </div>
+
                             <div className={`flex-1 flex flex-col items-center justify-center p-6 transition-colors ${subMatch.winner === subMatch.p2 ? 'bg-blue-50' : 'bg-white'}`}>
                                 <div className="text-4xl font-bold text-gray-800 mb-2 text-center break-words px-2 w-full">{subMatch.p2}</div>
                                 <div className="text-sm text-blue-500 font-bold tracking-widest uppercase mb-8">Blue</div>
