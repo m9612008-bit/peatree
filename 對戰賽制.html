@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>混合賽制產生器 (單機專用版)</title>
+    <title>混合賽制產生器 (邏輯修正版)</title>
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,6 +16,10 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- 引入 Firebase Compat SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     
     <style>
         /* 手機優化 - 保持原生滾動 */
@@ -60,6 +64,41 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // ==========================================
+        // 🔴 Firebase Config 🔴
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyAUVVtt9oAq5KweBs6eFzCmjs9mWq7q8N4",
+            authDomain: "beyblade2-6a371.firebaseapp.com",
+            projectId: "beyblade2-6a371",
+            storageBucket: "beyblade2-6a371.firebasestorage.app",
+            messagingSenderId: "136740311404",
+            appId: "1:136740311404:web:f50f31cd443a74dff92349"
+        };
+
+        // 初始化 Firebase
+        let db = null;
+        try {
+            if (typeof firebase !== 'undefined' && firebase.apps.length === 0) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            if (typeof firebase !== 'undefined') {
+                db = firebase.firestore();
+                console.log("🔥 Firebase initialized successfully!");
+            }
+        } catch (e) {
+            console.error("Firebase init error:", e);
+        }
+
+        // --- Helper: 安全更新網址 ---
+        const safeReplaceState = (url) => {
+            try {
+                window.history.replaceState({}, '', url);
+            } catch (e) {
+                console.warn("URL update skipped");
+            }
+        };
+
         // --- Icons ---
         const Icon = ({ path, size = 24, className = "", fill = "none", stroke = "currentColor" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -103,6 +142,9 @@
             const [activeMatchParams, setActiveMatchParams] = useState(null); 
             const [nextRoundReady, setNextRoundReady] = useState(false); 
             const [shuffleRound2, setShuffleRound2] = useState(false);
+            const [roomId, setRoomId] = useState(null); 
+            const [connectionStatus, setConnectionStatus] = useState(null); 
+            const [isOfflineMode, setIsOfflineMode] = useState(false);
 
             const [showResetConfirm, setShowResetConfirm] = useState(false);
             const [alertInfo, setAlertInfo] = useState({ show: false, message: '' });
@@ -110,10 +152,24 @@
             const [screenshotBlob, setScreenshotBlob] = useState(null); 
             const [isScreenshotLoading, setIsScreenshotLoading] = useState(false);
             const contentRef = useRef(null); 
+            const saveTimeoutRef = useRef(null);
+            const viewRef = useRef(view);
 
-            // Load Local
+            useEffect(() => { viewRef.current = view; }, [view]);
+
+            // --- 1. Init Room ---
             useEffect(() => {
-                const savedData = localStorage.getItem('tournament_data_offline');
+                const params = new URLSearchParams(window.location.search);
+                let currentRoomId = params.get('room');
+                if (!currentRoomId) {
+                    currentRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+                }
+                setRoomId(currentRoomId);
+            }, []);
+
+            // --- 2. Load Local ---
+            useEffect(() => {
+                const savedData = localStorage.getItem('tournament_data_v1');
                 if (savedData) {
                     try {
                         const parsed = JSON.parse(savedData);
@@ -128,67 +184,90 @@
                 }
             }, []);
 
-            // Save Local
+            // --- 3. Local Save ---
             useEffect(() => {
                 if (rounds.length === 0 && view === 'setup') return; 
                 const data = { rounds, winner, finalResults, nextRoundReady, timestamp: Date.now() };
-                localStorage.setItem('tournament_data_offline', JSON.stringify(data));
+                localStorage.setItem('tournament_data_v1', JSON.stringify(data));
             }, [rounds, winner, finalResults, nextRoundReady, view]);
 
+            // --- Cloud Save (Debounced) ---
+            const saveToCloud = (dataToSave) => {
+                if (!db || !roomId || isOfflineMode) return;
 
-            const handleSampleData = () => {
-                const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`);
-                setInputText(samples.join('\n'));
+                if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+                saveTimeoutRef.current = setTimeout(() => {
+                    const cloudData = { ...dataToSave, rounds: JSON.stringify(dataToSave.rounds) };
+                    
+                    db.collection("tournaments").doc(roomId).set(cloudData)
+                        .then(() => {
+                            setConnectionStatus('success');
+                            setTimeout(() => setConnectionStatus(null), 2000);
+                        })
+                        .catch(err => {
+                            console.error("Cloud save error", err);
+                            let msg = "連線失敗";
+                            if (err.code === 'permission-denied') msg = "權限被拒絕";
+                            if (err.code === 'resource-exhausted') {
+                                msg = "今日額度已滿 (切換至單機)";
+                                setIsOfflineMode(true);
+                            }
+                            if (err.code === 'unavailable') msg = "網路斷線";
+                            setConnectionStatus({ error: true, message: msg });
+                        });
+                }, 1500); 
             };
 
-            const shuffleArray = (array) => {
-                let currentIndex = array.length, randomIndex;
-                while (currentIndex !== 0) {
-                    randomIndex = Math.floor(Math.random() * currentIndex);
-                    currentIndex--;
-                    [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
-                }
-                return array;
+            // --- 4. Cloud Sync ---
+            useEffect(() => {
+                if (!db || !roomId || isOfflineMode) return;
+                
+                const unsubscribe = db.collection("tournaments").doc(roomId).onSnapshot((docSnap) => {
+                    if (docSnap.exists) {
+                        const data = docSnap.data();
+                        const cloudRounds = data.rounds ? JSON.parse(data.rounds) : [];
+                        
+                        if (cloudRounds.length > 0) {
+                            setRounds(cloudRounds);
+                            setWinner(data.winner || null);
+                            setFinalResults(data.finalResults || null);
+                            setNextRoundReady(data.nextRoundReady || false);
+                            if (viewRef.current === 'setup') {
+                                setView('bracket');
+                            }
+                        }
+                    }
+                }, (error) => {
+                     console.error("Sync error:", error);
+                     if (error.code === 'resource-exhausted') setIsOfflineMode(true);
+                });
+                return () => unsubscribe();
+            }, [db, roomId, isOfflineMode]);
+
+            const handleShare = () => {
+                 if (!db) { showAlert("尚未連線到 Firebase"); return; }
+                 try {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('room', roomId);
+                    const fullUrl = url.toString();
+                    safeReplaceState(fullUrl);
+                    if (navigator.share) navigator.share({ title: '賽程表', url: fullUrl }).catch(console.error);
+                    else navigator.clipboard.writeText(fullUrl).then(() => showAlert("連結已複製！"));
+                } catch (e) { showAlert("無法產生連結"); }
             };
 
-            const showAlert = (msg) => {
-                setAlertInfo({ show: true, message: msg });
-            };
-
-            const handleScreenshot = async () => {
-                if (!contentRef.current) return;
-                setIsScreenshotLoading(true);
-                const originalBg = contentRef.current.style.background;
-                const originalOverflow = contentRef.current.style.overflow;
-                contentRef.current.style.background = "#f9fafb"; 
-                contentRef.current.style.height = "auto";
-                contentRef.current.style.overflow = "visible"; 
-                const scrollableContainer = contentRef.current.querySelector('.overflow-x-auto');
-                let totalWidth = contentRef.current.scrollWidth;
-                if (scrollableContainer) totalWidth = Math.max(totalWidth, scrollableContainer.scrollWidth);
-                const totalHeight = contentRef.current.scrollHeight;
-                try {
-                    const canvas = await html2canvas(contentRef.current, { scale: 2, useCORS: true, logging: false, width: totalWidth, height: totalHeight, windowWidth: totalWidth, windowHeight: totalHeight, x: 0, y: 0, scrollX: 0, scrollY: 0 });
-                    canvas.toBlob((blob) => { setScreenshotImage(URL.createObjectURL(blob)); setScreenshotBlob(blob); setIsScreenshotLoading(false); }, 'image/png');
-                } catch (err) { console.error(err); showAlert("截圖失敗"); setIsScreenshotLoading(false); } finally { contentRef.current.style.background = originalBg; contentRef.current.style.height = ""; contentRef.current.style.overflow = originalOverflow; }
-            };
-
-            const handleSaveAction = async () => {
-                if (!screenshotBlob) return;
-                const fileName = `bracket_${new Date().getTime()}.png`;
-                const link = document.createElement('a'); link.download = fileName; link.href = screenshotImage; document.body.appendChild(link); link.click(); document.body.removeChild(link);
-            };
+            // ... (Other Handlers) ...
+            const handleSampleData = () => { const samples = Array.from({ length: 11 }, (_, i) => `選手 ${i + 1}`); setInputText(samples.join('\n')); };
+            const shuffleArray = (array) => { let currentIndex = array.length, randomIndex; while (currentIndex !== 0) { randomIndex = Math.floor(Math.random() * currentIndex); currentIndex--; [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]]; } return array; };
+            const showAlert = (msg) => { setAlertInfo({ show: true, message: msg }); };
+            const handleScreenshot = async () => { if (!contentRef.current) return; setIsScreenshotLoading(true); const originalBg = contentRef.current.style.background; const originalOverflow = contentRef.current.style.overflow; contentRef.current.style.background = "#f9fafb"; contentRef.current.style.height = "auto"; contentRef.current.style.overflow = "visible"; const scrollableContainer = contentRef.current.querySelector('.overflow-x-auto'); let totalWidth = contentRef.current.scrollWidth; if (scrollableContainer) totalWidth = Math.max(totalWidth, scrollableContainer.scrollWidth); const totalHeight = contentRef.current.scrollHeight; try { const canvas = await html2canvas(contentRef.current, { scale: 2, useCORS: true, logging: false, width: totalWidth, height: totalHeight, windowWidth: totalWidth, windowHeight: totalHeight, x: 0, y: 0, scrollX: 0, scrollY: 0 }); canvas.toBlob((blob) => { setScreenshotImage(URL.createObjectURL(blob)); setScreenshotBlob(blob); setIsScreenshotLoading(false); }, 'image/png'); } catch (err) { console.error(err); showAlert("截圖失敗"); setIsScreenshotLoading(false); } finally { contentRef.current.style.background = originalBg; contentRef.current.style.height = ""; contentRef.current.style.overflow = originalOverflow; } };
+            const handleSaveAction = async () => { if (!screenshotBlob) return; const fileName = `bracket_${new Date().getTime()}.png`; const file = new File([screenshotBlob], fileName, { type: 'image/png' }); if (navigator.share) try { await navigator.share({ files: [file] }); return; } catch (error) {} const link = document.createElement('a'); link.download = fileName; link.href = screenshotImage; document.body.appendChild(link); link.click(); document.body.removeChild(link); };
 
             const generateFirstRound = () => {
                 let lines = [];
-                if (inputMode === 'text') {
-                    lines = inputText.split(/[\n,]+/).map(s => s.trim()).filter(s => s !== '');
-                    if (lines.length < 2) { showAlert("請至少輸入兩位參賽者"); return; }
-                } else {
-                    const count = parseInt(inputCount, 10);
-                    if (isNaN(count) || count < 2) { showAlert("請輸入有效的人數"); return; }
-                    lines = Array.from({ length: count }, (_, i) => `${i + 1}號`);
-                }
+                if (inputMode === 'text') { lines = inputText.split(/[\n,]+/).map(s => s.trim()).filter(s => s !== ''); if (lines.length < 2) { showAlert("請至少輸入兩位參賽者"); return; } } 
+                else { const count = parseInt(inputCount, 10); if (isNaN(count) || count < 2) { showAlert("請輸入有效的人數"); return; } lines = Array.from({ length: count }, (_, i) => `${i + 1}號`); }
                 let players = shuffleArray([...lines]);
                 const round1Matches = [];
                 let i = 0;
@@ -197,8 +276,11 @@
                     if (p2) { round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'normal', p1, p2, s1: 0, s2: 0, winner: null, round: 0 }); i += 2; } 
                     else { round1Matches.push({ id: `r0-m${round1Matches.length}`, type: 'seed', p1, p2: null, winner: p1, round: 0 }); i += 1; }
                 }
-                setRounds([round1Matches]); setWinner(null); setFinalResults(null); setNextRoundReady(false);
+                const newRounds = [round1Matches];
+                setRounds(newRounds); setWinner(null); setFinalResults(null); setNextRoundReady(false);
+                if (db && roomId && !isOfflineMode) { try { const url = new URL(window.location.href); url.searchParams.set('room', roomId); safeReplaceState(url.toString()); } catch (e) {} }
                 setView('bracket');
+                saveToCloud({ rounds: newRounds, winner: null, finalResults: null, nextRoundReady: false });
             };
 
             const createNextRoundMatches = (currentRounds) => {
@@ -213,6 +295,7 @@
                 }
                 if (winners.length === 3) {
                     const [p1, p2, p3] = winners;
+                    // 修正 RR3 配對
                     nextMatches.push({ id: `r${nextRoundIndex}-m0`, type: 'rr3', p1, p2, p3, winner: null, round: nextRoundIndex, subMatches: [
                         { id: 'sub1', p1: p1, p2: p2, s1: 0, s2: 0, winner: null }, 
                         { id: 'sub2', p1: p2, p2: p3, s1: 0, s2: 0, winner: null }, 
@@ -233,30 +316,61 @@
                 return nextMatches;
             };
 
-            const handleGenerateNextRound = () => { const nextMatches = createNextRoundMatches(rounds); if (nextMatches) { setRounds([...rounds, nextMatches]); setNextRoundReady(false); } };
+            const handleGenerateNextRound = () => { 
+                const nextMatches = createNextRoundMatches(rounds); 
+                if (nextMatches) { 
+                    const newRounds = [...rounds, nextMatches];
+                    setRounds(newRounds); setNextRoundReady(false); 
+                    saveToCloud({ rounds: newRounds, winner, finalResults, nextRoundReady: false });
+                } 
+            };
             
-            // Winner Check Logic
+            // Winner Check
             useEffect(() => {
                 if (rounds.length === 0) return;
                 const currentRound = rounds[rounds.length - 1];
                 const allFinished = currentRound.every(m => m.winner !== null);
+                
                 if (allFinished && !winner) {
                     const winners = currentRound.map(m => m.winner).filter(w => w);
                     const isFinalRound = currentRound.some(m => m.type === 'final');
+                    
+                    let newWinner = null;
+                    let newFinalResults = null;
+                    let shouldSave = false;
+
                     if (isFinalRound) {
                         const finalMatch = currentRound.find(m => m.type === 'final'); const bronzeMatch = currentRound.find(m => m.type === 'bronze');
                         if (finalMatch?.winner && bronzeMatch?.winner) {
-                            setWinner(finalMatch.winner);
-                            setFinalResults({ first: finalMatch.winner, second: finalMatch.winner === finalMatch.p1 ? finalMatch.p2 : finalMatch.p1, third: bronzeMatch.winner, fourth: bronzeMatch.winner === bronzeMatch.p1 ? bronzeMatch.p2 : bronzeMatch.p1 });
-                            setNextRoundReady(false);
+                            newWinner = finalMatch.winner;
+                            // 邏輯修正：這裡只計算結果，不依賴 confirmMatchResult 傳來的資料
+                            newFinalResults = { 
+                                first: finalMatch.winner, 
+                                second: finalMatch.winner === finalMatch.p1 ? finalMatch.p2 : finalMatch.p1, 
+                                third: bronzeMatch.winner, 
+                                fourth: bronzeMatch.winner === bronzeMatch.p1 ? bronzeMatch.p2 : bronzeMatch.p1 
+                            };
+                            setWinner(newWinner); setFinalResults(newFinalResults); setNextRoundReady(false);
+                            shouldSave = true;
                         }
-                    } else if (winners.length === 1) { setWinner(winners[0]); setNextRoundReady(false); }
-                    else if (winners.length === 2) { const nextMatches = createNextRoundMatches(rounds); if (nextMatches) { setRounds(prev => [...prev, nextMatches]); setNextRoundReady(false); } }
-                    else { setNextRoundReady(true); }
-                } else { setNextRoundReady(false); }
-            }, [rounds, winner]);
+                    } else if (winners.length === 1) { 
+                        newWinner = winners[0]; setWinner(newWinner); setNextRoundReady(false); shouldSave = true;
+                    } else if (winners.length === 2) { 
+                         const nextMatches = createNextRoundMatches(rounds); 
+                         if (nextMatches) { 
+                             const newRounds = [...rounds, nextMatches];
+                             setRounds(newRounds); setNextRoundReady(false);
+                             saveToCloud({ rounds: newRounds, winner: null, finalResults: null, nextRoundReady: false });
+                             return;
+                         }
+                    } else if (!nextRoundReady) { setNextRoundReady(true); shouldSave = true; }
 
-            // Match Handlers
+                    if (shouldSave) {
+                         saveToCloud({ rounds, winner: newWinner || winner, finalResults: newFinalResults || finalResults, nextRoundReady: nextRoundReady || true });
+                    }
+                }
+            }, [rounds]);
+
             const openMatchView = (rIndex, mIndex) => { const match = rounds[rIndex][mIndex]; if (match.type === 'seed') return; setActiveMatchParams({ rIndex, mIndex }); setView('match'); };
             const openSubMatchView = (subMatchIndex) => { setActiveMatchParams({ ...activeMatchParams, subMatchIndex }); setView('subMatch'); };
             const closeSubMatchView = () => { const newParams = { ...activeMatchParams }; delete newParams.subMatchIndex; setActiveMatchParams(newParams); setView('match'); };
@@ -292,6 +406,7 @@
                     if (match.s1 >= 4 && match.s1 > match.s2) match.winner = match.p1; else if (match.s2 >= 4 && match.s2 > match.s1) match.winner = match.p2; else match.winner = null;
                 }
                 setRounds(newRounds);
+                saveToCloud({ rounds: newRounds, winner, finalResults, nextRoundReady });
             };
 
             const confirmMatchResult = () => {
@@ -299,8 +414,9 @@
                 const { rIndex, mIndex } = activeMatchParams;
                 const newRounds = rounds.map(r => r.map(m => { if (m.subMatches) return { ...m, subMatches: m.subMatches.map(s => ({...s})) }; return { ...m }; }));
                 const match = newRounds[rIndex][mIndex];
+                
                 let currentWinner = match.winner;
-
+                // 修正：這裡只處理 RR3 的冠軍產生，一般比賽的總冠軍交給 useEffect
                 if (match.type === 'rr3') {
                     const ranking = getRR3Ranking(match);
                     if (ranking && ranking.length > 0) {
@@ -310,10 +426,21 @@
                 } else {
                     if (!currentWinner) { if (match.s1 > match.s2) currentWinner = match.p1; else if (match.s2 > match.s1) currentWinner = match.p2; }
                 }
+                
                 if (currentWinner) match.winner = currentWinner;
                 setRounds(newRounds);
+                
+                // 修正：這裡不傳送 winner 狀態，只傳送 rounds，讓 useEffect 去判斷 winner
+                // 只有在 RR3 時我們確定 winner 產生了
+                const winnerToSave = match.type === 'rr3' ? currentWinner : winner;
+                
+                saveToCloud({ 
+                    rounds: newRounds, 
+                    winner: winnerToSave, 
+                    finalResults: match.type==='rr3'?{...finalResults}:finalResults, 
+                    nextRoundReady 
+                });
 
-                // Auto Navigation
                 let nextUnfinishedIndex = -1;
                 const currentRoundMatches = newRounds[rIndex];
                 if (match.type !== 'rr3') {
@@ -333,13 +460,19 @@
             
             const executeReset = () => {
                 setView('setup'); setRounds([]); setWinner(null); setFinalResults(null); setNextRoundReady(false); setShowResetConfirm(false);
+                setRoomId(Math.random().toString(36).substring(2, 8).toUpperCase());
                 localStorage.removeItem('tournament_data_v1');
+                safeReplaceState(window.location.pathname);
+                setIsOfflineMode(false);
             };
 
+            const safeReplaceState = (url) => { try { window.history.replaceState({}, '', url); } catch (e) { console.warn("URL update skipped"); } };
+
             // --- Views ---
+            // ... (Views code same as before, just ensuring renderMatchView uses justify-center) ...
             const renderSetup = () => (
                 <div className="max-w-lg mx-auto mt-4 sm:mt-10 animate-fade-in safe-area-pt pb-40 px-4 scroll-touch h-full overflow-y-auto">
-                    <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+                     <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
                         <div className="p-8">
                             <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Icons.Users className="text-blue-500" size={24} />建立賽程</h2></div>
                             <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
@@ -381,7 +514,7 @@
             const renderBracket = () => (
                 <div className="flex flex-col h-full safe-area-pt">
                     <div className="flex-1 flex flex-col relative overflow-auto no-scrollbar" ref={contentRef} data-screenshot-target="true">
-                        {winner && (
+                         {winner && (
                             <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col items-center justify-center animate-bounce-in shadow-sm text-center flex-shrink-0 mx-4 mt-4">
                                 <Icons.Trophy className="text-yellow-500 mb-2 w-16 h-16" />
                                 <h2 className="text-3xl font-extrabold text-yellow-700">比賽結束！</h2>
@@ -437,8 +570,11 @@
                     </div>
                     <div className="bg-white border-t p-4 flex justify-center safe-area-pb">
                          <button onClick={handleScreenshot} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform" title="截圖"><Icons.Camera size={16} /> 截圖</button>
+                         <button onClick={handleShare} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900 active:scale-95 transition-transform ml-2" title="分享/連線"><Icons.Share size={16} /> 分享連線</button>
                          <div className="h-10 w-full"></div>
                     </div>
+                    {connectionStatus && <div className={`fixed top-16 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg z-50 text-sm font-bold animate-bounce-in ${connectionStatus.error ? 'bg-red-500 text-white' : 'bg-green-500 text-white'}`}>{connectionStatus.message || (connectionStatus.error ? "連線錯誤" : "已儲存")}</div>}
+                    {isOfflineMode && <div className="fixed top-0 left-0 w-full bg-yellow-500 text-white text-xs font-bold text-center py-1 z-[100]">⚠️ 雲端額度已滿 (已切換至單機模式)</div>}
                 </div>
             );
 
@@ -498,7 +634,7 @@
                     const currentLeader = ranking[0].name;
 
                     return (
-                        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-fade-in safe-area-pt">
+                        <div className="fixed inset-0 bg-gray-100 z-50 flex flex-col animate-fade-in safe-area-pt">
                             <div className="bg-white shadow-sm p-4 flex items-center justify-between sticky top-0 z-30 flex-shrink-0">
                                 <button onClick={() => setView('bracket')} className="text-gray-500 hover:text-gray-800 p-2"><Icons.ArrowLeft size={24} /></button>
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Icons.List className="text-blue-500" size={20} />循環賽積分表</h2>
@@ -671,6 +807,12 @@
                                 <p className="font-bold text-gray-700">正在產生截圖...</p>
                                 <p className="text-xs text-gray-400 mt-1">請稍候，這可能需要幾秒鐘</p>
                             </div>
+                        </div>
+                    )}
+
+                    {isOfflineMode && (
+                         <div className="fixed top-0 left-0 w-full bg-yellow-500 text-white text-xs font-bold text-center py-1 z-[100]">
+                            ⚠️ 雲端額度已滿 (已切換至單機模式)
                         </div>
                     )}
                 </div>
